@@ -1,0 +1,22 @@
+schema_version = "1.0.0"
+
+id = "d_replicator"
+version = "0.10.3"
+name = "D_Replicator"
+tagline = "C4D MoGraph-style non-destructive cloner"
+maintainer = "D_plugins"
+type = "add-on"
+
+website = "https://sgnl88.com/"
+
+tags = ["Object", "Modeling", "Animation"]
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+copyright = [
+  "2026 D_plugins",
+]

@@ -1,0 +1,24 @@
+# Python キャッシュ / Python cache
+__pycache__/
+*.py[cod]
+
+# OS / エディタのゴミ / OS & editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+*.blend1
+*.blend2
+
+# 配布パッケージの本体は src/replicator.py が唯一の真実。
+# extension/D_Replicator.py は build_extension.ps1 が src からコピー生成するので追跡しない。
+# The package body is generated from src by build_extension.ps1, so it is not tracked.
+extension/D_Replicator.py
+
+# レンダー証跡画像(tests/render_*.py で再生成可能)/ render proof images (regenerable)
+bench/
+
+# 配布 zip はリポジトリに入れず GitHub Releases に上げる(build_extension.ps1 が生成)。
+# The distribution zip goes to GitHub Releases, not the repo.
+*.zip
