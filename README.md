@@ -1,7 +1,7 @@
 # D_Replicator
 
-Cinema 4D MoGraph 風の**非破壊クローン**アドオン for Blender 5.1 — by **D_plugins**.
-A Cinema 4D MoGraph–style **non‑destructive cloner** add‑on for Blender 5.1.
+非破壊複製ツール for Blender 5.1
+non‑destructive cloner add‑on for Blender 5.1.
 
 「Python 駆動インスタンシング」方式: numpy で全クローンの変換を毎フレーム計算し、極小の
 Geometry Nodes(表示専用)へ一括投入します。実オブジェクトを量産しないので軽量です。
@@ -79,7 +79,5 @@ tests/                 … ヘッドレス検証 + render_*.py
 ## ライセンス / License
 
 **GNU General Public License v3.0 or later** (`SPDX:GPL-3.0-or-later`)。
-Blender アドオンは `bpy` を利用するため GPL 互換が必須です。販売は可能ですが、
-購入者にソースが渡り再配布も妨げられません。全文は [`LICENSE`](LICENSE) を参照。
 
 Copyright (C) 2026 D_plugins.
