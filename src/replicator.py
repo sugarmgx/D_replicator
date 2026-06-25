@@ -22,7 +22,7 @@
 bl_info = {
     "name": "D_Replicator",
     "author": "D_plugins",
-    "version": (0, 10, 3),
+    "version": (0, 10, 4),
     "blender": (5, 1, 0),
     "location": "View3D > Sidebar > Replicator",
     "description": "Cinema 4D MoGraph 風の非破壊クローン (Python 駆動インスタンシング)",

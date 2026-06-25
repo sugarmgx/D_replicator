@@ -12,9 +12,9 @@ desktop.ini
 *.blend2
 
 # 配布パッケージの本体は src/replicator.py が唯一の真実。
-# extension/D_Replicator.py は build_extension.ps1 が src からコピー生成するので追跡しない。
-# The package body is generated from src by build_extension.ps1, so it is not tracked.
-extension/D_Replicator.py
+# extension/__init__.py は build_extension.ps1 が src からコピー生成するので追跡しない。
+# The package body (extension/__init__.py) is generated from src by build_extension.ps1.
+extension/__init__.py
 
 # レンダー証跡画像(tests/render_*.py で再生成可能)/ render proof images (regenerable)
 bench/

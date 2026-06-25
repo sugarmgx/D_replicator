@@ -8,9 +8,11 @@ $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $blender = "C:\Program Files\Blender Foundation\Blender 5.1\blender.exe"
 
-# 1) 本体コピー(src が唯一の真実。extension/D_Replicator.py はその配布用コピー)
-Copy-Item (Join-Path $root "src\replicator.py") (Join-Path $root "extension\D_Replicator.py") -Force
-Write-Host "copied src/replicator.py -> extension/D_Replicator.py"
+# 1) 本体コピー(src が唯一の真実 → extension/__init__.py が配布用の本体)。
+#    単一ファイル拡張(__init__.py に全コード)。サブモジュール名 D_Replicator が
+#    パッケージ名 d_replicator と大小無視で衝突して循環インポートになる macOS 不具合の対策。
+Copy-Item (Join-Path $root "src\replicator.py") (Join-Path $root "extension\__init__.py") -Force
+Write-Host "copied src/replicator.py -> extension/__init__.py (single-file extension)"
 
 # 2) 一時フォルダにビルド(OneDrive 外)
 $ver = (Select-String -Path (Join-Path $root "extension\blender_manifest.toml") `
