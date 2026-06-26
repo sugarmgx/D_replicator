@@ -270,6 +270,41 @@ def test_select_hidden_source():
               "in_vl_before=%s" % in_vl_before)
 
 
+# ---------------------------------------------------------------- シードの堅牢性(負値/既定)
+def test_seed_robust():
+    clear()
+    A, B = mk_cube("A"), mk_cube("B")
+    e = replicator.create_replicator(bpy.context, [A, B])
+    p = e.replicator
+    # 既定値: 全シード 123456 に統一
+    check("分配シードの既定が 123456", p.dist_seed == 123456, "=%d" % p.dist_seed)
+    check("散布シードの既定が 123456", p.scatter_seed == 123456, "=%d" % p.scatter_seed)
+    p.dist_mode = 'RANDOM'
+    # 保存ファイル相当の負値を直接書き込み(RNA クランプを回避)→ 落ちないこと
+    p["dist_seed"] = -5
+    ok, err = True, ""
+    try:
+        replicator.update_replicator(e)
+    except Exception as ex:
+        ok, err = False, repr(ex)
+    check("負の分配シードでもクラッシュしない(正規化)", ok, err)
+    # モジュレータの負シードも
+    m = p.modulators.add()
+    check("モジュレータ seed の既定が 123456", m.seed == 123456, "=%d" % m.seed)
+    m.mtype = 'RANDOM'
+    m["seed"] = -10
+    try:
+        replicator.update_replicator(e)
+    except Exception as ex:
+        ok, err = False, repr(ex)
+    check("負のモジュレータシードでもクラッシュしない", ok, err)
+    # UI 経由の代入は min=0 でクランプ(負を入れられない)
+    p.dist_seed = -3
+    check("分配シードは min=0(UI 代入で負にできない)", p.dist_seed >= 0, "=%d" % p.dist_seed)
+    m.seed = -7
+    check("モジュレータシードも min=0", m.seed >= 0, "=%d" % m.seed)
+
+
 # ---------------------------------------------------------------- ⑧ 本体の緑表示
 def test_green():
     clear()
@@ -335,6 +370,7 @@ def main():
     test_field_curve()
     test_source_lock()
     test_select_hidden_source()
+    test_seed_robust()
     test_green()
     test_panel_smoke()
     log("=== RESULT:", "ALL PASS ===" if not _fails else ("SOME FAILED: %s ===" % _fails))

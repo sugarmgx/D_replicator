@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "d_replicator"
-version = "0.11.4"
+version = "0.11.7"
 name = "D_Replicator"
-tagline = "C4D MoGraph-style non-destructive cloner"
+tagline = "Non-destructive mass-cloning & animation toolkit"
 maintainer = "D_plugins"
 type = "add-on"
 

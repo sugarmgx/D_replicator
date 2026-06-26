@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: GPL-3.0-or-later
-# D_Replicator — Cinema 4D MoGraph 風クローン (by D_plugins)
+# D_Replicator — 非破壊の大量複製 & アニメーション アドオン (by D_plugins)
 # Copyright (C) 2026 D_plugins
 # This program is free software: you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
@@ -22,10 +22,10 @@
 bl_info = {
     "name": "D_Replicator",
     "author": "D_plugins",
-    "version": (0, 11, 4),
+    "version": (0, 11, 7),
     "blender": (5, 1, 0),
     "location": "View3D > Sidebar > Replicator",
-    "description": "Cinema 4D MoGraph 風の非破壊クローン (Python 駆動インスタンシング)",
+    "description": "オブジェクトを大量に複製してアニメーションする非破壊アドオン (Python 駆動インスタンシング)",
     "category": "Object",
 }
 
@@ -62,7 +62,7 @@ def build_display_gn():
     n_out = nodes.new("NodeGroupOutput")
     col_info = nodes.new("GeometryNodeCollectionInfo")
     col_info.inputs["Separate Children"].default_value = True
-    # Reset Children OFF = 複製元オブジェクト自身の変換(スケール/回転)を尊重(C4D の Relative 相当)
+    # Reset Children OFF = 複製元オブジェクト自身の変換(スケール/回転)を尊重(相対モード)
     col_info.inputs["Reset Children"].default_value = False
     iop = nodes.new("GeometryNodeInstanceOnPoints")
     iop.inputs["Pick Instance"].default_value = True
@@ -134,6 +134,12 @@ def ensure_gn(display):
 
 
 # ---------------------------------------------------------------- クローン計算
+def _seed(v):
+    """シードを numpy RandomState が受け付ける範囲 [0, 2**32-1] に正規化。
+    負値(古い保存ファイル等)でも落ちないよう下位31bitを取る。"""
+    return int(v) & 0x7fffffff
+
+
 def _axis_up(axis):
     """track 軸に対する up 軸(track と平行にならないよう選ぶ)。"""
     return axis, ('Z' if axis in ('Y', '-Y') else 'Y')
@@ -209,7 +215,7 @@ def _surface_scatter(me, count, seed):
     if total <= 1e-12:
         return None, None
     cum = np.cumsum(area)
-    rng = np.random.RandomState(int(seed) & 0x7fffffff)
+    rng = np.random.RandomState(_seed(seed))
     # 各点に固定の3値(行=点 index)。count を増やしても前の行は不変
     # = 散布率を上げると既存点は動かず点が増えるだけ(密度アニメ向き)。
     rv = rng.random((count, 3))
@@ -376,7 +382,7 @@ def compute_points(p, empty=None):
         a = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
         pos = np.stack([np.cos(a) * r, np.sin(a) * r, np.zeros(n)], axis=1)
         base_rot = np.zeros((n, 3))
-    elif p.mode == 'MESH':   # 任意メッシュの頂点/辺/面の中心(C4D オブジェクトモード相当)
+    elif p.mode == 'MESH':   # 任意メッシュの頂点/辺/面の中心に配置
         return _mesh_points(p, empty)
     elif p.mode == 'SPLINE':  # スプライン(カーブ)上に弧長等間隔配置
         return _spline_points(p, empty)
@@ -526,7 +532,7 @@ def _apply_modulator(m, pos, rot, scale, ramp_norm, ramp_acc, wm, t_sec, n):
     msc = m.scale * s                                        # スケール量
     wc = wm[:, None]
     if m.mtype == 'RANDOM':
-        rng = np.random.RandomState(m.seed)
+        rng = np.random.RandomState(_seed(m.seed))
         rp = rng.random((n, 3)).astype(np.float32) * 2.0 - 1.0
         rr = rng.random((n, 3)).astype(np.float32) * 2.0 - 1.0
         rs = rng.random(n).astype(np.float32) * 2.0 - 1.0
@@ -543,7 +549,7 @@ def _apply_modulator(m, pos, rot, scale, ramp_norm, ramp_acc, wm, t_sec, n):
         if m.time_random > 1e-9:
             # クローンごとに時間係数をランダムに散らす(位相/速度をばらつかせて有機的に)。
             # シードは Random と共用。前から固定なので数を変えても並びが安定。
-            rng = np.random.RandomState(m.seed)
+            rng = np.random.RandomState(_seed(m.seed))
             rf = 1.0 + (rng.random(n).astype(np.float32) * 2.0 - 1.0) * m.time_random
             tta = (base_tt * rf).astype(np.float32)          # (n,)
         else:
@@ -599,7 +605,7 @@ def compute_index(p, n, n_sources, perm=None):
     if getattr(p, "dist_mode", 'RANDOM') == 'ITERATE':
         positions = np.arange(n) % n_sources                 # 0,1,2,0,1,2,... 規則的
     else:
-        positions = np.random.RandomState(p.dist_seed).randint(0, n_sources, size=n)
+        positions = np.random.RandomState(_seed(p.dist_seed)).randint(0, n_sources, size=n)
     if perm is not None and len(perm) >= n_sources:
         return perm[positions].astype(np.int32)              # ユーザー並び→GN index へ写像
     return positions.astype(np.int32)
@@ -942,8 +948,8 @@ _MODE_ITEMS_BASE = [
     ('LINEAR', "リニア", "原点から1ステップずつ"),
     ('RADIAL', "放射", "円周状(シンプル・従来)"),
     ('CIRCLE', "円形", "半径/平面/角度/Align 対応の円配置"),
-    ('MESH', "メッシュ", "任意メッシュの頂点/辺/面の中心に配置(C4D オブジェクトモード相当)"),
-    ('SPLINE', "スプライン", "カーブ上に弧長等間隔で配置(C4D スプラインモード相当)"),
+    ('MESH', "メッシュ", "任意メッシュの頂点/辺/面の中心に配置"),
+    ('SPLINE', "スプライン", "カーブ上に弧長等間隔で配置"),
 ]
 _MESH_SRC_ITEMS_BASE = [
     ('VERTS', "頂点", "各頂点に配置"),
@@ -1023,7 +1029,7 @@ class ReplicatorModulator(bpy.types.PropertyGroup):
                              default=(0.0, 0.0, 0.0), update=_upd)
     scale: FloatProperty(name="スケール", default=0.0, update=_upd)
     strength: FloatProperty(name="強度", default=1.0, min=0.0, soft_max=1.0, update=_upd)
-    seed: IntProperty(name="シード", default=0, update=_upd)            # RANDOM 用
+    seed: IntProperty(name="シード", default=123456, min=0, update=_upd)  # RANDOM 用(負不可)
     normalized: BoolProperty(name="正規化(端→端 0→1)", default=True, update=_upd)  # STEP 用
     speed: FloatProperty(name="速度", default=1.0, update=_upd)         # TIME 用
     time_random: FloatProperty(name="時間ランダム", default=0.0, min=0.0, soft_max=1.0,  # TIME 用
@@ -1061,7 +1067,7 @@ class ReplicatorProps(bpy.types.PropertyGroup):
                                default='XY', update=_upd)
     radial_arc: FloatProperty(name="角度 (度)", default=360.0, min=0.0, soft_max=360.0, update=_upd)
     radial_align: BoolProperty(name="軸を外向きに揃える", default=True, update=_upd)
-    # メッシュモード(任意メッシュの頂点/辺/面の中心に配置 = C4D オブジェクトモード相当)
+    # メッシュモード(任意メッシュの頂点/辺/面の中心に配置)
     mesh_object: PointerProperty(name="参照メッシュ", type=bpy.types.Object,
                                  poll=_poll_mesh_object, update=_upd)
     mesh_source: EnumProperty(name="配置先", items=_mesh_src_items, update=_upd)  # 既定=先頭(VERTS)
@@ -1071,7 +1077,7 @@ class ReplicatorProps(bpy.types.PropertyGroup):
                                   description="100%=「数」個が基準。0〜1000%(最大10倍)。"
                                               "前から増えるので率を変えても既存点は動かない",
                                   update=_upd)
-    scatter_seed: IntProperty(name="シード", default=0, update=_upd)
+    scatter_seed: IntProperty(name="シード", default=123456, min=0, update=_upd)
     mesh_align: BoolProperty(name="法線に揃える", default=True,
                              description="クローンの揃え軸を頂点/面の法線方向へ向ける", update=_upd)
     mesh_use_evaluated: BoolProperty(name="変形後に追従(評価メッシュ)", default=False,
@@ -1082,7 +1088,7 @@ class ReplicatorProps(bpy.types.PropertyGroup):
                              items=[('X', "X", ""), ('Y', "Y", ""), ('Z', "Z", ""),
                                     ('-X', "-X", ""), ('-Y', "-Y", ""), ('-Z', "-Z", "")],
                              default='Z', update=_upd)
-    # スプラインモード(カーブ上に弧長等間隔配置 = C4D スプラインモード相当)
+    # スプラインモード(カーブ上に弧長等間隔配置)
     spline_object: PointerProperty(name="参照スプライン", type=bpy.types.Object,
                                    poll=_poll_curve_object, update=_upd)
     spline_align: BoolProperty(name="接線に揃える", default=True,
@@ -1107,10 +1113,10 @@ class ReplicatorProps(bpy.types.PropertyGroup):
         name="分配", default='RANDOM', update=_upd,
         items=[('RANDOM', "ランダム", "各クローンへランダムに割り当て(シードで変化)"),
                ('ITERATE', "規則的(順番)", "0,1,2,… と順番に繰り返し割り当て(規則的)")])
-    dist_seed: IntProperty(name="分配シード", default=0, update=_upd)
+    dist_seed: IntProperty(name="分配シード", default=123456, min=0, update=_upd)
     # Random(単体・旧/移行用。新規 UI には出さずスタックへ自動移行)
     random_enable: BoolProperty(name="ランダム", default=False, update=_upd)
-    random_seed: IntProperty(name="シード", default=0, update=_upd)
+    random_seed: IntProperty(name="シード", default=123456, min=0, update=_upd)
     random_pos: FloatVectorProperty(name="位置 (cm)", size=3, subtype='XYZ', step=20,
                                     default=(0.0, 0.0, 0.0), update=_upd)
     random_rot: FloatVectorProperty(name="回転 (度)", size=3, subtype='XYZ',
@@ -2149,11 +2155,11 @@ _TR_EN = {
     "円形": "Circle",
     "半径/平面/角度/Align 対応の円配置": "Circular layout with radius/plane/angle/align",
     "メッシュ": "Mesh",
-    "任意メッシュの頂点/辺/面の中心に配置(C4D オブジェクトモード相当)":
-        "Place on vertices/edges/face centers of any mesh (like C4D Object mode)",
+    "任意メッシュの頂点/辺/面の中心に配置":
+        "Place on vertices/edges/face centers of any mesh",
     "スプライン": "Spline",
-    "カーブ上に弧長等間隔で配置(C4D スプラインモード相当)":
-        "Place evenly along a curve by arc length (like C4D Spline mode)",
+    "カーブ上に弧長等間隔で配置":
+        "Place evenly along a curve by arc length",
     "セーフティ(数を最大100に制限)": "Safety (limit count to 100)",
     "OFF で最大1000まで許容。クローン数が多いと Blender が落ちる場合あり":
         "OFF allows up to 1000. A high clone count may crash Blender",
