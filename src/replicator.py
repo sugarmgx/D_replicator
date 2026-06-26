@@ -22,7 +22,7 @@
 bl_info = {
     "name": "D_Replicator",
     "author": "D_plugins",
-    "version": (0, 10, 4),
+    "version": (0, 11, 4),
     "blender": (5, 1, 0),
     "location": "View3D > Sidebar > Replicator",
     "description": "Cinema 4D MoGraph 風の非破壊クローン (Python 駆動インスタンシング)",
@@ -424,6 +424,45 @@ def _hash_lattice(px, py, pz):
     return s - np.floor(s)                    # fract → [0,1)
 
 
+FALLOFF_NG_PREFIX = "Replicator_Falloff_"   # フィールド減衰カーブを載せる隠しノードグループ名
+
+
+def _falloff_curve_node(p, create=False):
+    """フィールド減衰の『ベジエ曲線』を保持する Float Curve ノードを返す。
+    CurveMapping は特定の RNA 上にしか存在しないため、Replicator ごとに
+    隠しノードグループ(ShaderNodeTree)へ Float Curve を1個置いてホストする。"""
+    name = p.falloff_curve_ng
+    ng = bpy.data.node_groups.get(name) if name else None
+    if ng is None and create:
+        ng = bpy.data.node_groups.new(FALLOFF_NG_PREFIX + p.id_data.name, 'ShaderNodeTree')
+        ng.use_fake_user = True               # 参照されなくても保存に残す(永続化)
+        p.falloff_curve_ng = ng.name
+    if ng is None:
+        return None
+    node = next((nd for nd in ng.nodes if nd.bl_idname == 'ShaderNodeFloatCurve'), None)
+    if node is None and create:
+        node = ng.nodes.new("ShaderNodeFloatCurve")
+    return node
+
+
+def _apply_falloff(p, g):
+    """生の勾配 g(0..1, 1=芯)を 0..1 の重みへ整形。
+    カーブ ON ならベジエ曲線で自由に再マップ、OFF なら従来の smoothstep(減衰幅)。"""
+    if getattr(p, "field_use_curve", False):
+        node = _falloff_curve_node(p, create=True)
+        if node is not None:
+            m = node.mapping
+            try:
+                m.update()
+            except Exception:
+                pass
+            cv = m.curves[0]
+            out = np.fromiter((m.evaluate(cv, float(x)) for x in g),
+                              dtype=np.float32, count=len(g))
+            return np.clip(out, 0.0, 1.0)
+    return _shape(g, p.field_falloff)
+
+
 def _value_noise(coords):
     """3D value noise(trilinear + smoothstep)→ [0,1)。numpy のみ(scipy 不要)。"""
     c = coords.astype(np.float64)
@@ -456,16 +495,14 @@ def compute_field_weight(p, empty, pos):
     ft = p.field_type
     if ft == 'SPHERE':
         d = np.linalg.norm(local, axis=1)
-        w = _shape(np.clip((R - d) / R, 0.0, 1.0), p.field_falloff)
+        g = np.clip((R - d) / R, 0.0, 1.0)
     elif ft == 'BOX':
-        g = (R - np.max(np.abs(local), axis=1)) / R   # 一番外れた軸で内外が決まる
-        w = _shape(np.clip(g, 0.0, 1.0), p.field_falloff)
+        g = np.clip((R - np.max(np.abs(local), axis=1)) / R, 0.0, 1.0)  # 一番外れた軸で内外
     elif ft == 'LINEAR':
         g = np.clip(local[:, 2] / R, 0.0, 1.0)        # 矢印(ローカル +Z)の先側が強い
-        w = _shape(g, p.field_falloff)
     else:  # NOISE
-        w = _shape(_value_noise(local / R), p.field_falloff)
-    w = np.asarray(w, dtype=np.float32)
+        g = _value_noise(local / R)
+    w = np.asarray(_apply_falloff(p, g), dtype=np.float32)  # カーブ or smoothstep で整形
     if p.field_invert:
         w = 1.0 - w
     return w.astype(np.float32)
@@ -502,10 +539,19 @@ def _apply_modulator(m, pos, rot, scale, ramp_norm, ramp_acc, wm, t_sec, n):
         rot = rot + sr * mr * wc
         scale = scale * (1.0 + sr * msc * wc)
     else:  # TIME(時間で累積。キーフレーム不要)
-        tt = t_sec * m.speed
-        pos = pos + (mp * tt) * wc
-        rot = rot + (mr * tt) * wc
-        scale = scale * (1.0 + (msc * tt) * wm)[:, None]
+        base_tt = t_sec * m.speed
+        if m.time_random > 1e-9:
+            # クローンごとに時間係数をランダムに散らす(位相/速度をばらつかせて有機的に)。
+            # シードは Random と共用。前から固定なので数を変えても並びが安定。
+            rng = np.random.RandomState(m.seed)
+            rf = 1.0 + (rng.random(n).astype(np.float32) * 2.0 - 1.0) * m.time_random
+            tta = (base_tt * rf).astype(np.float32)          # (n,)
+        else:
+            tta = np.full(n, base_tt, dtype=np.float32)      # (n,) 全クローン同じ
+        ttc = tta[:, None]                                   # (n,1)
+        pos = pos + (mp[None, :] * ttc) * wc
+        rot = rot + (mr[None, :] * ttc) * wc
+        scale = scale * (1.0 + (msc * tta) * wm)[:, None]
     return pos, rot, scale
 
 
@@ -545,12 +591,18 @@ def compute_clone_data(p, empty=None):
     return pos.astype(np.float32), rot.astype(np.float32), scale.astype(np.float32)
 
 
-def compute_index(p, n, n_sources):
-    """各クローンがどの複製元を使うか(seed で決まるランダム分配)。"""
+def compute_index(p, n, n_sources, perm=None):
+    """各クローンがどの複製元を使うか。ランダム分配 or 規則的(順番に繰り返し)。
+    perm=複製元の並べ替え写像(ユーザー並びの位置→GN の名前順index)。None なら素の index。"""
     if n_sources <= 1 or n == 0:
         return np.zeros(n, dtype=np.int32)
-    rng = np.random.RandomState(p.dist_seed)
-    return rng.randint(0, n_sources, size=n).astype(np.int32)
+    if getattr(p, "dist_mode", 'RANDOM') == 'ITERATE':
+        positions = np.arange(n) % n_sources                 # 0,1,2,0,1,2,... 規則的
+    else:
+        positions = np.random.RandomState(p.dist_seed).randint(0, n_sources, size=n)
+    if perm is not None and len(perm) >= n_sources:
+        return perm[positions].astype(np.int32)              # ユーザー並び→GN index へ写像
+    return positions.astype(np.int32)
 
 
 def write_display(display, pos, rot, scale, idx):
@@ -614,6 +666,23 @@ def is_replicator_empty(ob):
     return bool(ob and ob.type == 'EMPTY' and p and p.is_replicator)
 
 
+REP_GREEN = (0.20, 1.00, 0.35, 1.0)   # Replicator 本体の表示色(緑)
+
+
+def _style_replicator(empty):
+    """Replicator 本体を緑表示 + 名前表示にして見分けやすくする(一度だけ)。
+    注: Blender はオブジェクト個別の『アウトライナー文字色』API を持たないため、
+    ビューポートのオブジェクトカラー(緑)+ 名前表示が最も近い表現。"""
+    if empty.get("_rep_styled"):
+        return
+    empty["_rep_styled"] = True
+    try:
+        empty.color = REP_GREEN          # ビューポート「オブジェクト」カラー表示で緑
+        empty.show_name = True           # 本体名をビューポートに表示
+    except Exception:
+        pass
+
+
 def _set_collection_in_scene(col, visible):
     """src_col をシーン(ビューレイヤー)に出すか。出す=複製元が編集用に見える。"""
     scene_col = bpy.context.scene.collection
@@ -630,9 +699,10 @@ def _set_collection_in_scene(col, visible):
             pass
 
 
-def gather_sources(empty):
-    """複製元の一覧。子がメッシュ/ライトならそれ、子が Replicator ならその表示メッシュ(入れ子)。
-    ライトは GN インスタンスとして実際に照らす(EEVEE Next / Cycles で確認済)。"""
+def _source_pairs(empty):
+    """(複製元の子オブジェクト, GN がインスタンス化する実体) のペア一覧。
+    メッシュ/ライト → 自身、子 Replicator(入れ子)→ その表示メッシュ。
+    UI で並べ替えるのは『子』、GN が並べるのは『実体(名前順)』なので両方を持つ。"""
     out = []
     for c in empty.children:
         if c.get(DISPLAY_TAG) or c.get(FIELD_TAG):
@@ -640,10 +710,58 @@ def gather_sources(empty):
         if is_replicator_empty(c):
             d = get_display(c)
             if d:
-                out.append(d)
+                out.append((c, d))
         elif c.type in ('MESH', 'LIGHT'):
+            out.append((c, c))
+    return out
+
+
+def gather_sources(empty):
+    """GN がインスタンス化する複製元実体の一覧(メッシュ/ライト/入れ子なら表示メッシュ)。
+    ライトは GN インスタンスとして実際に照らす(EEVEE Next / Cycles で確認済)。"""
+    return [gn for (_child, gn) in _source_pairs(empty)]
+
+
+def _sync_source_order(empty):
+    """複製元の並び順リスト(source_order)を現在の子に合わせる。
+    既存の順番は保ち、増えた分は末尾に追加、消えた分は除去。"""
+    p = empty.replicator
+    names = [c.name for (c, _gn) in _source_pairs(empty)]
+    nameset = set(names)
+    for i in reversed(range(len(p.source_order))):           # 消えた複製元を除去
+        if p.source_order[i].name not in nameset:
+            p.source_order.remove(i)
+    have = {it.name for it in p.source_order}
+    for nm in names:                                         # 増えた複製元を末尾へ
+        if nm not in have:
+            p.source_order.add().name = nm
+
+
+def _ordered_source_children(empty):
+    """複製元の子オブジェクトを source_order の順で返す(UI 描画・並べ替え用)。"""
+    p = empty.replicator
+    by_name = {c.name: c for (c, _gn) in _source_pairs(empty)}
+    out = [by_name[it.name] for it in p.source_order if it.name in by_name]
+    for nm, c in by_name.items():                            # 取りこぼし(同期前)を末尾へ
+        if c not in out:
             out.append(c)
     return out
+
+
+def _source_permutation(empty):
+    """『複製の割り当て順』の写像を返す(長さ=複製元数)。
+    GN は実体を**名前順**に並べる(実機確認済)。`perm[ユーザー並びの位置] = GN の名前順index`
+    にすることで、UI で並べ替えた順がそのまま複製の順になる。複製元0/1個なら None。"""
+    pairs = _source_pairs(empty)
+    if len(pairs) <= 1:
+        return None
+    child_to_gn = {c.name: g.name for (c, g) in pairs}
+    gn_pos = {nm: i for i, nm in enumerate(sorted(child_to_gn.values()))}  # GN=名前順
+    order = [it.name for it in empty.replicator.source_order if it.name in child_to_gn]
+    for c, _g in pairs:                                      # source_order 未同期分は末尾
+        if c.name not in order:
+            order.append(c.name)
+    return np.array([gn_pos[child_to_gn[nm]] for nm in order], dtype=np.int32)
 
 
 def sync_source_collection(empty, sources):
@@ -678,15 +796,23 @@ def sync_source_collection(empty, sources):
                     c.objects.unlink(o)
                 except Exception:
                     pass
-    # 編集表示: ON ならメッシュ複製元をシーンにも出す(入れ子の内側表示は除く)
+    # 編集表示: ON ならメッシュ複製元をシーンにも出す(入れ子の内側表示は除く)。
+    # 複製元の位置は**常にロック**(誤って動かさない)。クローン全体の移動は Replicator_Display で。
     if empty.replicator.show_sources:
         scene_col = bpy.context.scene.collection
-        for o in want:
-            if not o.get(DISPLAY_TAG) and o.name not in scene_col.objects:
+        for o in want:                              # GN 実体をシーンに出す(メッシュ複製元の可視化)
+            if o.get(DISPLAY_TAG):
+                continue
+            if o.name not in scene_col.objects:
                 try:
                     scene_col.objects.link(o)
                 except Exception:
                     pass
+        for (child, _gn) in _source_pairs(empty):   # 複製元の子(掴める実体)の位置をロック
+            try:
+                child.lock_location = (True, True, True)
+            except Exception:
+                pass
 
 
 def apply_transforms(empty):
@@ -700,7 +826,7 @@ def apply_transforms(empty):
         return
     n_src = len(p.src_collection.objects) if p.src_collection else 0
     pos, rot, scale = compute_clone_data(p, empty)
-    idx = compute_index(p, len(pos), n_src)
+    idx = compute_index(p, len(pos), n_src, _source_permutation(empty))  # 並べ替え反映
     write_display(display, pos, rot, scale, idx)
 
 
@@ -742,11 +868,13 @@ def update_replicator(empty):
         return
     p = empty.replicator
     _migrate_to_stack(p)
+    _style_replicator(empty)   # 既存 Replicator にも緑表示を一度だけ適用
     display = get_display(empty)
     if not display:
         return
     ensure_gn(display)
     sources = gather_sources(empty)
+    _sync_source_order(empty)              # 並び順リストを現在の複製元に同期
     sync_source_collection(empty, sources)
     set_collection(display, p.src_collection)
     set_realize(display, p.realize_output)
@@ -874,6 +1002,12 @@ def _O(layout, idname, s, **kw):
 
 
 # ---------------------------------------------------------------- データ
+class ReplicatorSourceItem(bpy.types.PropertyGroup):
+    """複製元の並び順を保持する1項目(name=複製元の子オブジェクト名)。
+    この順番が『複製の割り当て順』になる(GN は名前順=固定なので、Python で並べ替えを写像)。"""
+    name: StringProperty(default="")
+
+
 class ReplicatorModulator(bpy.types.PropertyGroup):
     """スタックに積む変調器1つ。種類で挙動が変わる(Random/Step/Time)。"""
     name: StringProperty(default="Modulator")
@@ -883,7 +1017,7 @@ class ReplicatorModulator(bpy.types.PropertyGroup):
                                ('STEP', "Step", "クローン列に沿った勾配(0→1)"),
                                ('TIME', "Time", "時間で累積(キーフレーム不要)")],
                         default='RANDOM', update=_upd)
-    pos: FloatVectorProperty(name="位置 (cm)", size=3, subtype='XYZ',
+    pos: FloatVectorProperty(name="位置 (cm)", size=3, subtype='XYZ', step=20,
                              default=(0.0, 0.0, 0.0), update=_upd)
     rot: FloatVectorProperty(name="回転 (度)", size=3, subtype='XYZ',
                              default=(0.0, 0.0, 0.0), update=_upd)
@@ -892,6 +1026,10 @@ class ReplicatorModulator(bpy.types.PropertyGroup):
     seed: IntProperty(name="シード", default=0, update=_upd)            # RANDOM 用
     normalized: BoolProperty(name="正規化(端→端 0→1)", default=True, update=_upd)  # STEP 用
     speed: FloatProperty(name="速度", default=1.0, update=_upd)         # TIME 用
+    time_random: FloatProperty(name="時間ランダム", default=0.0, min=0.0, soft_max=1.0,  # TIME 用
+                               description="クローンごとに時間の進みを乱す(0=全部同じ / 1=±100%でばらつく)。"
+                                           "シードは Random と共用",
+                               update=_upd)
     use_field: BoolProperty(name="フィールドで絞る", default=False, update=_upd)
 
 
@@ -899,6 +1037,9 @@ class ReplicatorProps(bpy.types.PropertyGroup):
     is_replicator: BoolProperty(default=False)
     src_collection: PointerProperty(type=bpy.types.Collection)
     show_sources: BoolProperty(name="複製元を表示(編集用)", default=False, update=_upd)
+    # 複製元の並び順(=複製の割り当て順)。上下で並べ替え。
+    source_order: CollectionProperty(type=ReplicatorSourceItem)
+    source_index: IntProperty(default=0)
     mode: EnumProperty(name="モード", items=_mode_items, update=_upd)   # 既定=先頭(GRID)
     count_safety: BoolProperty(
         name="セーフティ(数を最大100に制限)", default=True, update=_upd_count,
@@ -909,11 +1050,12 @@ class ReplicatorProps(bpy.types.PropertyGroup):
                          max=COUNT_CAP_MAX, update=_upd_count)
     count_z: IntProperty(name="数 Z", default=3, min=1, soft_max=COUNT_CAP_MAX,
                          max=COUNT_CAP_MAX, update=_upd_count)
-    spacing_x: FloatProperty(name="X", default=200.0, update=_upd)
-    spacing_y: FloatProperty(name="Y", default=200.0, update=_upd)
-    spacing_z: FloatProperty(name="Z", default=200.0, update=_upd)
+    # step はドラッグ感度(既定3=/100で0.03)。間隔/半径は数百cm を扱うので step=20 で速めに
+    spacing_x: FloatProperty(name="X", default=200.0, step=20, update=_upd)
+    spacing_y: FloatProperty(name="Y", default=200.0, step=20, update=_upd)
+    spacing_z: FloatProperty(name="Z", default=200.0, step=20, update=_upd)
     # 円形(放射)モード
-    radius: FloatProperty(name="半径 (cm)", default=200.0, min=0.0, update=_upd)
+    radius: FloatProperty(name="半径 (cm)", default=200.0, min=0.0, step=20, update=_upd)
     radial_plane: EnumProperty(name="平面",
                                items=[('XY', "XY", ""), ('XZ', "XZ", ""), ('YZ', "YZ", "")],
                                default='XY', update=_upd)
@@ -951,7 +1093,7 @@ class ReplicatorProps(bpy.types.PropertyGroup):
     realize_output: BoolProperty(name="出力をジオメトリ化(Realize)", default=False, update=_upd)
     # 内蔵 段階トランスフォーム
     step_normalized: BoolProperty(name="正規化(端→端 0→1)", default=True, update=_upd)
-    step_pos: FloatVectorProperty(name="位置/ステップ (cm)", size=3, subtype='XYZ',
+    step_pos: FloatVectorProperty(name="位置/ステップ (cm)", size=3, subtype='XYZ', step=20,
                                   default=(0.0, 0.0, 0.0), update=_upd)
     step_rot: FloatVectorProperty(name="回転/ステップ (度)", size=3, subtype='XYZ',
                                   default=(0.0, 0.0, 0.0), update=_upd)
@@ -960,12 +1102,16 @@ class ReplicatorProps(bpy.types.PropertyGroup):
     # モジュレータ・スタック(Random / Step / Time を複数積む)
     modulators: CollectionProperty(type=ReplicatorModulator)
     modulator_index: IntProperty(default=0)
-    # 複数オブジェクト分配
+    # 複数オブジェクト分配(ランダム / 規則的)
+    dist_mode: EnumProperty(
+        name="分配", default='RANDOM', update=_upd,
+        items=[('RANDOM', "ランダム", "各クローンへランダムに割り当て(シードで変化)"),
+               ('ITERATE', "規則的(順番)", "0,1,2,… と順番に繰り返し割り当て(規則的)")])
     dist_seed: IntProperty(name="分配シード", default=0, update=_upd)
     # Random(単体・旧/移行用。新規 UI には出さずスタックへ自動移行)
     random_enable: BoolProperty(name="ランダム", default=False, update=_upd)
     random_seed: IntProperty(name="シード", default=0, update=_upd)
-    random_pos: FloatVectorProperty(name="位置 (cm)", size=3, subtype='XYZ',
+    random_pos: FloatVectorProperty(name="位置 (cm)", size=3, subtype='XYZ', step=20,
                                     default=(0.0, 0.0, 0.0), update=_upd)
     random_rot: FloatVectorProperty(name="回転 (度)", size=3, subtype='XYZ',
                                     default=(0.0, 0.0, 0.0), update=_upd)
@@ -981,12 +1127,16 @@ class ReplicatorProps(bpy.types.PropertyGroup):
                                default='RANDOM', update=_upd)
     field_type: EnumProperty(name="種類", items=_field_type_items,
                              update=_upd_field_type)   # 既定=先頭(SPHERE)
-    field_radius: FloatProperty(name="半径/長さ/スケール (cm)", default=300.0, min=0.0,
+    field_radius: FloatProperty(name="半径/長さ/スケール (cm)", default=300.0, min=0.0, step=20,
                                 description="球=半径 / 箱=半幅 / リニア=長さ / ノイズ=粒の大きさ",
                                 update=_upd_field)
     field_falloff: FloatProperty(name="減衰幅", default=1.0, min=0.0, max=1.0,
                                  description="0=芯だけで急に切れる / 1=滑らかに減衰",
                                  update=_upd)
+    # 減衰をベジエ曲線で制御(芯1→境界0 の効き方を自由なカーブで再マップ)
+    field_use_curve: BoolProperty(name="カーブで減衰を制御", default=False, update=_upd,
+                                  description="ON で減衰の効き方をベジエ曲線で自由に編集できる(減衰幅の代わり)")
+    falloff_curve_ng: StringProperty(default="")   # 減衰カーブを載せる隠しノードグループ名
     field_invert: BoolProperty(name="反転", default=False, update=_upd)
 
 
@@ -997,6 +1147,7 @@ def create_replicator(context, sources=None):
     empty.empty_display_type = 'PLAIN_AXES'
     coll.objects.link(empty)
     empty.replicator.is_replicator = True
+    _style_replicator(empty)   # 本体を緑表示 + 名前表示で見分けやすく
 
     src_col = bpy.data.collections.new(empty.name + "_Sources")
     # src_col はシーン(ビューレイヤー)にリンクしない = 複製元は単体表示/レンダーされない。
@@ -1254,14 +1405,29 @@ class OBJECT_OT_replicator_select_source(bpy.types.Operator):
         o = bpy.data.objects.get(self.name)
         if o is None:
             return {'CANCELLED'}
+        # 複製元は「複製元を表示」OFF だとビューレイヤー非所属 → そのまま select_set すると
+        # 「Object not in View Layer」エラーになる。先に表示を ON にして取り込んでから選択する。
+        e = o.parent
+        if is_replicator_empty(e) and o.name not in context.view_layer.objects:
+            e.replicator.show_sources = True
+            update_replicator(e)
+        if o.name not in context.view_layer.objects:   # まだ非所属ならシーンへ直接リンク
+            try:
+                context.scene.collection.objects.link(o)
+            except Exception:
+                pass
         try:
             o.hide_set(False)
         except Exception:
             pass
         for s in context.selected_objects:
             s.select_set(False)
-        o.select_set(True)
-        context.view_layer.objects.active = o
+        try:
+            o.select_set(True)
+            context.view_layer.objects.active = o
+        except Exception as ex:
+            self.report({'WARNING'}, "複製元を選択できませんでした: %s" % ex)
+            return {'CANCELLED'}
         return {'FINISHED'}
 
 
@@ -1282,6 +1448,196 @@ class OBJECT_OT_replicator_add_field(bpy.types.Operator):
             s.select_set(False)
         fo.select_set(True)
         context.view_layer.objects.active = fo   # 即ドラッグできるよう選択
+        return {'FINISHED'}
+
+
+class OBJECT_OT_replicator_expand(bpy.types.Operator):
+    bl_idname = "object.replicator_expand"
+    bl_label = "個別に展開(オブジェクト化)"
+    bl_description = ("現在の複製状態を、編集可能な実オブジェクトとして個別に書き出す。"
+                     "元の Replicator はそのまま残る(非破壊)。書き出したオブジェクトは"
+                     "新しいコレクションに入り、1つずつ自由に編集できる")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return is_replicator_empty(context.active_object)
+
+    def execute(self, context):
+        e = context.active_object
+        if not is_replicator_empty(e):
+            return {'CANCELLED'}
+        display = get_display(e)
+        if display is None:
+            return {'CANCELLED'}
+        deps = context.evaluated_depsgraph_get()
+        new_col = bpy.data.collections.new(e.name + "_Expanded")
+        (context.collection or context.scene.collection).children.link(new_col)
+        made = 0
+        # depsgraph の実インスタンス(=実際に描画されている各クローン)をそのまま実体化。
+        # GN の計算結果(位置/回転/スケール/分配)を Blender 自身の評価で正確に再現する。
+        for inst in deps.object_instances:
+            if not inst.is_instance or inst.parent is None:
+                continue
+            if inst.parent.original is not display:        # この Replicator の表示由来のみ
+                continue
+            src = inst.object
+            if src is None or src.type not in ('MESH', 'LIGHT', 'CURVE', 'FONT', 'SURFACE'):
+                continue
+            src_orig = src.original
+            new_ob = src_orig.copy()                       # 実オブジェクト(独立して編集可)
+            if src_orig.data is not None:
+                new_ob.data = src_orig.data.copy()         # データも複製(元と共有しない)
+            try:
+                new_ob.animation_data_clear()
+            except Exception:
+                pass
+            new_ob.parent = None
+            new_col.objects.link(new_ob)
+            new_ob.matrix_world = inst.matrix_world.copy() # GN が出した最終ワールド変換
+            new_ob.hide_render = False
+            try:
+                new_ob.hide_set(False)
+            except Exception:
+                pass
+            new_ob.lock_location = (False, False, False)
+            made += 1
+        if made == 0:
+            self.report({'WARNING'}, "展開対象がありません(複製元やクローンを確認)")
+            return {'CANCELLED'}
+        self.report({'INFO'}, "%d 個のオブジェクトに展開しました(%s)" % (made, new_col.name))
+        return {'FINISHED'}
+
+
+class OBJECT_OT_replicator_dissolve(bpy.types.Operator):
+    bl_idname = "object.replicator_dissolve"
+    bl_label = "最上位を解除(本体を削除)"
+    bl_description = ("入れ子の**最上位 Replicator だけ**を削除し、中身(子 Replicator や複製元)は"
+                     "構造を保ったまま独立させる。ワールド位置は維持。最上位の入れ子にだけ出る")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        e = context.active_object
+        # 最上位(親が Replicator でない)かつ 子に Replicator を含む(=入れ子の最上位)
+        return (is_replicator_empty(e) and not is_replicator_empty(e.parent)
+                and any(is_replicator_empty(c) for c in e.children))
+
+    def execute(self, context):
+        e = context.active_object
+        if not is_replicator_empty(e):
+            return {'CANCELLED'}
+        target = e.users_collection[0] if e.users_collection else context.scene.collection
+        disp = get_display(e)
+        field = get_field(e)
+        src_col = e.replicator.src_collection
+        # 子(複製元)を解放: unparent(ワールド維持)+ 位置ロック解除 + 再表示
+        released = []
+        for c in list(e.children):
+            if c is disp or c is field:
+                continue
+            w = c.matrix_world.copy()
+            c.parent = None
+            c.matrix_world = w
+            try:
+                c.lock_location = (False, False, False)
+            except Exception:
+                pass
+            c.hide_render = False
+            try:
+                c.hide_set(False)
+            except Exception:
+                pass
+            released.append(c)
+        # src_col に残る実体(入れ子の内側表示など)を target へ移して孤立を防ぐ
+        if src_col:
+            for o in list(src_col.objects):
+                if o.name not in target.objects:
+                    try:
+                        target.objects.link(o)
+                    except Exception:
+                        pass
+                try:
+                    src_col.objects.unlink(o)
+                except Exception:
+                    pass
+        # 最上位の本体・表示・フィールドを削除
+        for o in (disp, field, e):
+            if o is not None:
+                try:
+                    bpy.data.objects.remove(o, do_unlink=True)
+                except Exception:
+                    pass
+        if src_col:
+            try:
+                bpy.data.collections.remove(src_col)
+            except Exception:
+                pass
+        # 解放した子 Replicator を独立 Replicator として再構築
+        active = None
+        for c in released:
+            if c.name in bpy.data.objects and is_replicator_empty(c):
+                update_replicator(c)
+                active = active or c
+        if active is None:
+            active = next((c for c in released if c.name in bpy.data.objects), None)
+        if active is not None:
+            for s in context.selected_objects:
+                s.select_set(False)
+            try:
+                active.select_set(True)
+                context.view_layer.objects.active = active
+            except Exception:
+                pass
+        self.report({'INFO'}, "最上位 Replicator を解除しました(中身は独立)")
+        return {'FINISHED'}
+
+
+class OBJECT_OT_replicator_source_move(bpy.types.Operator):
+    bl_idname = "object.replicator_source_move"
+    bl_label = "複製元を並べ替え"
+    bl_description = "複製元の順番を上下に入れ替える(=複製の割り当て順が変わる)"
+    bl_options = {'REGISTER', 'UNDO'}
+    name: StringProperty()
+    direction: StringProperty(default='UP')
+
+    def execute(self, context):
+        e = context.active_object
+        if not is_replicator_empty(e):
+            return {'CANCELLED'}
+        p = e.replicator
+        _sync_source_order(e)                              # 念のため同期してから
+        i = p.source_order.find(self.name)
+        if i < 0:
+            return {'CANCELLED'}
+        j = i - 1 if self.direction == 'UP' else i + 1
+        if 0 <= j < len(p.source_order):
+            p.source_order.move(i, j)
+            p.source_index = j
+            update_replicator(e)
+        return {'FINISHED'}
+
+
+class OBJECT_OT_replicator_select_display(bpy.types.Operator):
+    bl_idname = "object.replicator_select_display"
+    bl_label = "Replicator_Display を選択"
+    bl_description = ("クローン全体の表示オブジェクト(Replicator_Display)を選択。"
+                     "これを動かすとクローン全体の位置を編集できる(複製元の位置は触らない)")
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        e = context.active_object
+        d = get_display(e) if is_replicator_empty(e) else None
+        if d is None:
+            return {'CANCELLED'}
+        for s in context.selected_objects:
+            s.select_set(False)
+        try:
+            d.select_set(True)
+            context.view_layer.objects.active = d
+        except Exception as ex:
+            self.report({'WARNING'}, "選択できませんでした: %s" % ex)
+            return {'CANCELLED'}
         return {'FINISHED'}
 
 
@@ -1412,6 +1768,11 @@ def _draw_modulator_stack(layout, ob, p):
             _P(sub, m, "normalized")
         else:  # TIME
             _key_row(sub, m, "speed", ob, base + ".speed")
+            _P(sub, m, "time_random", slider=True)
+            if m.time_random > 0.0:    # クローンごとの時間ばらつき(シードは Random と共用)
+                r = sub.row(align=True)
+                _P(r, m, "seed")
+                r.operator("object.replicator_modulator_dice", text="", icon='FILE_REFRESH')
             _L(sub, "時間で自動累積(キー不要)。量や速度はキー可", icon='TIME')
         if p.field_enable:
             _P(sub, m, "use_field")
@@ -1430,7 +1791,14 @@ def _draw_field_box(layout, p):
             ob = p.id_data
             _P(box, p, "field_type")
             _key_row(box, p, "field_radius", ob, "replicator.field_radius")
-            _key_row(box, p, "field_falloff", ob, "replicator.field_falloff")
+            _P(box, p, "field_use_curve")
+            if p.field_use_curve:        # ベジエ曲線で減衰の効き方を制御
+                node = _falloff_curve_node(p, create=True)
+                if node is not None:
+                    box.template_curve_mapping(node, "mapping")
+                _L(box, "横=芯→外(左1→右0)/ 縦=効きの強さ。点を足して自由な減衰に", icon='IPO_BEZIER')
+            else:
+                _key_row(box, p, "field_falloff", ob, "replicator.field_falloff")
             _P(box, p, "field_invert")
             # ギズモの位置・角度(数値+キー)。位置をキーすればフィールドが掃く動きに
             _key_row(box, fo, "location", fo, "location", text="位置 (m)")
@@ -1551,14 +1919,26 @@ class VIEW3D_PT_replicator(bpy.types.Panel):
         box = col.box()
         _L(box, "複製元(参照オブジェクト)")
         _P(box, p, "show_sources", toggle=True)
-        srcs = [c for c in ob.children if not c.get(DISPLAY_TAG) and not c.get(FIELD_TAG)]
+        if p.show_sources:   # 位置は常にロック。全体の移動は Replicator_Display で
+            _O(box, "object.replicator_select_display",
+               "Replicator_Display を選択(位置編集)", icon='OBJECT_DATA')
+        srcs = _ordered_source_children(ob)   # 並び順で描画(↑↓で割り当て順を変更)
         if not srcs:
             _L(box, "(なし) 選択して下のボタンで追加", icon='INFO')
-        for c in srcs:
+        elif len(srcs) > 1:
+            _L(box, "↑↓で複製の割り当て順を変更")
+        n_src = len(srcs)
+        for i, c in enumerate(srcs):
             r = box.row(align=True)
             ic = {'MESH': 'OUTLINER_OB_MESH', 'LIGHT': 'OUTLINER_OB_LIGHT'}.get(
                 c.type, 'OUTLINER_OB_EMPTY')
-            r.label(text=c.name, icon=ic)   # オブジェクト名はそのまま(翻訳しない)
+            r.label(text="%d  %s" % (i, c.name), icon=ic)   # 順番 + 名前(名前は翻訳しない)
+            sub = r.row(align=True)
+            sub.enabled = n_src > 1
+            up = sub.operator("object.replicator_source_move", text="", icon='TRIA_UP')
+            up.name, up.direction = c.name, 'UP'
+            dn = sub.operator("object.replicator_source_move", text="", icon='TRIA_DOWN')
+            dn.name, dn.direction = c.name, 'DOWN'
             r.operator("object.replicator_select_source", text="", icon='RESTRICT_SELECT_OFF').name = c.name
             r.operator("object.replicator_remove_source", text="", icon='X').name = c.name
         _O(box, "object.replicator_add_source", "選択を複製元に追加", icon='ADD')
@@ -1572,13 +1952,24 @@ class VIEW3D_PT_replicator(bpy.types.Panel):
         if p.field_enable:
             _P(box, p, "step_use_field")
 
-        row = col.row(align=True)
-        _P(row, p, "dist_seed")
-        row.operator("object.replicator_dice", text="", icon='FILE_REFRESH')
+        # 複数複製元の分配(ランダム / 規則的)。複製元が2つ以上のとき意味を持つ。
+        _P(col, p, "dist_mode")
+        if p.dist_mode == 'RANDOM':
+            row = col.row(align=True)
+            _P(row, p, "dist_seed")
+            row.operator("object.replicator_dice", text="", icon='FILE_REFRESH')
 
         _draw_modulator_stack(col, ob, p)
 
         _draw_field_box(col, p)
+
+        # ツール: 個別に展開(実オブジェクト化)/ 最上位を解除(入れ子の最上位だけ削除)
+        col.separator()
+        trow = col.row(align=True)
+        _O(trow, "object.replicator_expand", "個別に展開", icon='OUTLINER_OB_GROUP_INSTANCE')
+        # 最上位(親が Replicator でない)かつ 子に Replicator を含む時だけ「最上位を解除」
+        if not is_replicator_empty(ob.parent) and any(is_replicator_empty(c) for c in ob.children):
+            _O(trow, "object.replicator_dissolve", "最上位を解除", icon='UNLINKED')
 
         _O(col, "object.replicator_refresh", "更新", icon='FILE_REFRESH')
 
@@ -1586,7 +1977,23 @@ class VIEW3D_PT_replicator(bpy.types.Panel):
 # ---------------------------------------------------------------- ハンドラ / 登録
 _field_sig = {}        # empty.name -> フィールドの Replicator 相対変換シグネチャ
 _ref_sig = {}          # empty.name -> 配置参照(メッシュ/スプライン)のシグネチャ
+_curve_sig = {}        # empty.name -> 減衰カーブの制御点シグネチャ(編集のライブ反映用)
 _field_busy = False    # 再入ガード(自分のメッシュ書込で再呼出されても無視)
+
+
+def _curve_signature(p):
+    """減衰カーブの制御点を丸めたタプル。カーブ編集(点の追加/移動)を検知して再計算する。"""
+    if not getattr(p, "field_use_curve", False):
+        return None
+    node = _falloff_curve_node(p)
+    if node is None:
+        return None
+    try:
+        cv = node.mapping.curves[0]
+        return tuple((round(pt.location.x, 4), round(pt.location.y, 4), pt.handle_type)
+                     for pt in cv.points)
+    except Exception:
+        return None
 
 
 def _field_signature(empty, fo):
@@ -1640,7 +2047,9 @@ def _depsgraph_handler(scene, depsgraph):
     """フィールドギズモのドラッグ / 配置参照(メッシュ・スプライン)の移動をライブ再計算。
     書き込むのは表示メッシュだけ=参照側の行列は変わらない → シグネチャ不変 → ループしない。"""
     global _field_busy
-    if _field_busy or not depsgraph.id_type_updated('OBJECT'):
+    # OBJECT(ギズモ/参照の移動)か NODETREE(減衰カーブの編集)の更新時だけ走る。
+    if _field_busy or not (depsgraph.id_type_updated('OBJECT')
+                           or depsgraph.id_type_updated('NODETREE')):
         return
     for ob in scene.objects:
         if not is_replicator_empty(ob):
@@ -1652,6 +2061,10 @@ def _depsgraph_handler(scene, depsgraph):
             sig = _field_signature(ob, fo)
             if _field_sig.get(ob.name) != sig:
                 _field_sig[ob.name] = sig
+                changed = True
+            csig = _curve_signature(p)              # 減衰カーブ編集のライブ反映
+            if _curve_sig.get(ob.name) != csig:
+                _curve_sig[ob.name] = csig
                 changed = True
         ref = _placement_ref(p)
         if ref is not None:
@@ -1830,12 +2243,24 @@ _TR_EN = {
     "複製元(参照オブジェクト)": "Sources (reference objects)",
     "(なし) 選択して下のボタンで追加": "(none) select and add with the button below",
     "段階トランスフォーム(内蔵)": "Step Transform (built-in)",
+    # --- v0.11 で追加 ---
+    "時間ランダム": "Time Random",
+    "位置を編集": "Edit Position",
+    "分配": "Distribution",
+    "カーブで減衰を制御": "Falloff Curve",
+    "横=芯→外(左1→右0)/ 縦=効きの強さ。点を足して自由な減衰に":
+        "X = core→edge (left 1 → right 0) / Y = strength. Add points for a custom falloff",
+    "個別に展開": "Expand to Objects",
+    "最上位を解除": "Dissolve Top",
+    "Replicator_Display を選択(位置編集)": "Select Replicator_Display (edit position)",
+    "↑↓で複製の割り当て順を変更": "↑↓ to reorder clone assignment",
     # --- 言語トグル ---
     "言語": "Language",
 }
 
 
 classes = (
+    ReplicatorSourceItem,  # ReplicatorProps より前(CollectionProperty が参照)
     ReplicatorModulator,   # ReplicatorProps より前に登録(CollectionProperty が参照)
     ReplicatorProps,
     OBJECT_OT_add_replicator,
@@ -1845,7 +2270,11 @@ classes = (
     OBJECT_OT_replicator_add_source,
     OBJECT_OT_replicator_remove_source,
     OBJECT_OT_replicator_select_source,
+    OBJECT_OT_replicator_select_display,
+    OBJECT_OT_replicator_source_move,
     OBJECT_OT_replicator_add_field,
+    OBJECT_OT_replicator_expand,
+    OBJECT_OT_replicator_dissolve,
     OBJECT_OT_d_replicator_set_lang,
     OBJECT_OT_modulator_add,
     OBJECT_OT_modulator_remove,
