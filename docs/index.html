@@ -1,0 +1,832 @@
+<!doctype html>
+<!--
+  ════════════════════════════════════════════════════════════════════
+   D_Replicator 公式ドキュメント — このファイル1つで完結(画像・外部依存なし)。
+   ・このファイルは  manual_src/build_site.py + manual_content.py  から生成しています。
+   ・直接編集してもOK。ただし  python build_site.py  で作り直すと上書きされます。
+     恒久的に直すなら  manual_content.py  を編集してください。
+   ・本文を探す …… 「章:」で検索すると各章のコメント目印に飛べます。
+   ・色/フォント … 下の <style> 内、/* ===== ... ===== */ の区切りを参照。
+   ・動作(JS)… 言語切替・章の表示切替・検索。通常さわらなくてOK。
+  ════════════════════════════════════════════════════════════════════
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D_Replicator — Manual / Signal88.</title>
+
+<!-- ===== 見た目(色・フォント・レイアウト)。各部はコメントで区切ってあります ===== -->
+<style>
+
+/* ===== 配色 / フォント(Signal88. のサイトに準拠) ===== */
+:root{
+  --bg:#000000;                  /* 背景 = 黒 */
+  --fg:#ffffff;                  /* 文字 = 白 */
+  --mut:rgba(255,255,255,.66);   /* 補助文字 */
+  --mut2:rgba(255,255,255,.40);  /* さらに淡い */
+  --accent:#9df9ee;              /* アクセント = ミントシアン */
+  --warn:#ff6b6b;                /* 警告 = 赤 */
+  --line:rgba(255,255,255,.20);  /* 罫線 */
+  --line2:rgba(255,255,255,.10); /* 薄い罫線 */
+  --f:"Neue Haas Grotesk Text","Helvetica Neue",Helvetica,Arial,"Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",sans-serif;
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  --maxw:1080px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--f);font-size:15px;line-height:1.85;
+  letter-spacing:.005em;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+b{font-weight:700;color:var(--fg)}
+a{color:var(--accent);text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+a:hover{opacity:.65}
+::selection{background:var(--accent);color:#000}
+
+/* ===== ヘッダ(ロゴ + 副題 + 言語トグル) ===== */
+.top{max-width:var(--maxw);margin:0 auto;padding:54px 32px 0}
+.brand{font-size:30px;font-weight:700;letter-spacing:-.015em}
+.brand b{color:var(--accent)}                         /* _ をシアンに */
+.tagline{margin-top:9px;color:var(--mut);font-size:13px;letter-spacing:.02em}
+.modes{margin-top:20px;display:flex;align-items:baseline;gap:18px;
+  padding-bottom:16px;border-bottom:1px solid var(--line)}
+.modes .lab{color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.18em}
+.lang{margin-left:auto;font-size:13px;letter-spacing:.06em}
+.lang button{background:none;border:0;color:var(--mut2);font:inherit;cursor:pointer;padding:0}
+.lang button:hover{color:var(--fg)}
+.lang button.on{color:var(--accent)}
+.lang .sep{color:var(--mut2);margin:0 7px}
+
+/* ===== レイアウト(目次 + 本文) ===== */
+.wrap{max-width:var(--maxw);margin:0 auto;padding:34px 32px 60px;
+  display:grid;grid-template-columns:200px 1fr;gap:54px;align-items:start}
+
+/* ===== 目次(サイドバー) ===== */
+.side{position:sticky;top:26px;align-self:start;max-height:calc(100vh - 46px);overflow:auto;font-size:13px}
+.side::-webkit-scrollbar{width:8px}
+.side::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14)}
+.search{display:block;width:100%;background:none;border:0;border-bottom:1px solid var(--line);
+  color:var(--fg);font:inherit;font-size:13px;padding:7px 0;margin-bottom:18px;outline:none;letter-spacing:.03em}
+.search::placeholder{color:var(--mut2)}
+.search:focus{border-bottom-color:var(--accent)}
+.grp{margin:22px 0 8px;font-size:11px;letter-spacing:.04em;color:var(--mut2)}
+.grp:first-of-type{margin-top:0}
+.grp .gk{color:var(--accent);font-weight:700;letter-spacing:.18em;margin-right:8px}
+.nl{display:block;padding:3.5px 0;color:var(--mut);text-decoration:none;line-height:1.5;letter-spacing:.005em}
+.nl:hover{color:var(--fg)}
+.nl.on{color:var(--accent)}
+.nl.on::before{content:"— ";color:var(--accent)}
+
+/* ===== 本文 ===== */
+main{min-width:0;max-width:740px}
+section{display:none}
+section.on{display:block;animation:fade .2s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.shead{margin:0 0 20px}
+.kick{color:var(--mut2);font-size:10px;font-weight:700;letter-spacing:.24em;text-transform:uppercase;margin-bottom:9px}
+h1{font-size:22px;font-weight:700;letter-spacing:-.01em;line-height:1.4;margin:0}
+h1::before{content:"[ ";color:var(--accent)}          /* [ 見出し ] */
+h1::after{content:" ]";color:var(--accent)}
+h2{font-size:14px;font-weight:700;letter-spacing:.02em;margin:34px 0 12px;color:var(--fg)}
+h2::before{content:"# ";color:var(--accent)}
+section>p{margin:14px 0;color:var(--mut)}
+section>p b, li b{color:var(--fg)}
+ul{margin:14px 0;padding:0;list-style:none}
+li{position:relative;padding-left:20px;margin:8px 0;color:var(--mut)}
+li::before{content:"—";position:absolute;left:0;color:var(--accent)}   /* — の中黒 */
+.cap{color:var(--mut2);font-size:12px;margin:8px 0}
+
+/* ===== 注記 / 警告(左罫線のみ・最小限) ===== */
+.callout{margin:18px 0;padding:3px 0 3px 16px;border-left:2px solid var(--accent);color:var(--mut)}
+.callout .tag{display:inline-block;color:var(--accent);font-size:10px;font-weight:700;letter-spacing:.16em;margin-right:9px}
+.callout b{color:var(--fg)}
+.warn{border-left-color:var(--warn);color:rgba(255,158,158,.9)}
+.warn .tag{color:var(--warn)}
+.warn b{color:#ffd2d2}
+
+/* ===== 表(スペックシート風) ===== */
+.tw{margin:18px 0;overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{text-align:left;font-weight:700;color:var(--fg);padding:9px 18px 9px 0;
+  border-bottom:1px solid var(--line);letter-spacing:.02em;white-space:nowrap;vertical-align:bottom}
+td{padding:9px 18px 9px 0;border-bottom:1px solid var(--line2);color:var(--mut);vertical-align:top}
+td:first-child{color:var(--fg)}                       /* 1列目(ラベル)は白 */
+tbody tr:hover td{color:var(--fg)}
+
+/* ===== コード ===== */
+pre{margin:14px 0;padding:14px 16px;background:rgba(255,255,255,.04);
+  border-left:2px solid var(--accent);overflow:auto}
+code{font-family:var(--mono);font-size:13px;color:#cfeee9}
+
+/* ===== フッタ ===== */
+footer{max-width:var(--maxw);margin:0 auto;padding:28px 32px 60px;border-top:1px solid var(--line2);
+  color:var(--mut2);font-size:12px;letter-spacing:.03em}
+
+/* 言語表示の出し分け */
+body.ja .en, body.en .ja{display:none!important}
+
+/* 狭い画面 */
+@media(max-width:760px){
+  .wrap{grid-template-columns:1fr;gap:22px}
+  .side{position:relative;top:0;max-height:none;border-bottom:1px solid var(--line2);padding-bottom:16px}
+  main{max-width:none}
+  .top,.wrap,footer{padding-left:20px;padding-right:20px}
+}
+
+</style>
+</head>
+
+<body class="ja">
+
+<!-- ── ヘッダ:ロゴ + 副題 + 言語トグル ── -->
+<header class="top">
+  <div class="brand">D<b>_</b>Replicator</div>
+  <div class="tagline ja">― 非破壊の大量複製 ＆ アニメーション アドオン ―  by Signal88.</div>
+  <div class="tagline en">― non-destructive mass-cloning &amp; animation add-on ―  by Signal88.</div>
+  <div class="modes">
+    <span class="lab">[ DOCUMENT ]</span>
+    <span class="lang"><button data-lang="ja">ja</button><span class="sep">/</span><button data-lang="en">en</button></span>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ── 左:目次(日本語/英語で出し分け) ── -->
+  <nav class="side">
+    <input class="search ja" type="search" placeholder="検索 / search…">
+    <input class="search en" type="search" placeholder="search…">
+    <!-- 目次(日本語) -->
+    <div class="nav nav-ja ja">
+
+      <!-- 第1部　クイックスタート -->
+      <div class="grp"><span class="gk">PART 1</span>第1部　クイックスタート</div>
+      <a class="nl" data-target="ja-1" data-idx="1" href="#ja-1">1. D_Replicator とは</a>
+      <a class="nl" data-target="ja-2" data-idx="2" href="#ja-2">2. インストール</a>
+      <a class="nl" data-target="ja-3" data-idx="3" href="#ja-3">3. はじめての複製 — 3ステップ</a>
+      <a class="nl" data-target="ja-4" data-idx="4" href="#ja-4">4. 画面の見かた(3つの要素)</a>
+      <a class="nl" data-target="ja-5" data-idx="5" href="#ja-5">5. 言語の切り替え(日本語 / English)</a>
+
+      <!-- 第2部　リファレンス -->
+      <div class="grp"><span class="gk">PART 2</span>第2部　リファレンス</div>
+      <a class="nl" data-target="ja-7" data-idx="7" href="#ja-7">6. 配置モード</a>
+      <a class="nl" data-target="ja-8" data-idx="8" href="#ja-8">7. 複製元(参照オブジェクト)</a>
+      <a class="nl" data-target="ja-9" data-idx="9" href="#ja-9">8. 段階トランスフォーム(複製ごとの変化)</a>
+      <a class="nl" data-target="ja-10" data-idx="10" href="#ja-10">9. モジュレーター(ランダム / 段階 / 時間)</a>
+      <a class="nl" data-target="ja-11" data-idx="11" href="#ja-11">10. 範囲(フィールド)— 効果を範囲で絞る</a>
+      <a class="nl" data-target="ja-12" data-idx="12" href="#ja-12">11. ライトの複製</a>
+      <a class="nl" data-target="ja-13" data-idx="13" href="#ja-13">12. キーフレーム / アニメーション</a>
+      <a class="nl" data-target="ja-14" data-idx="14" href="#ja-14">13. 入れ子と「最上位を解除」</a>
+      <a class="nl" data-target="ja-15" data-idx="15" href="#ja-15">14. 実体化(Realize)/ 個別に展開</a>
+      <a class="nl" data-target="ja-16" data-idx="16" href="#ja-16">15. シードについて</a>
+      <a class="nl" data-target="ja-17" data-idx="17" href="#ja-17">16. 困ったとき / 既知の制限</a>
+    </div>
+    <!-- 目次(English) -->
+    <div class="nav nav-en en">
+
+      <!-- Part 1　Quick Start -->
+      <div class="grp"><span class="gk">PART 1</span>Part 1　Quick Start</div>
+      <a class="nl" data-target="en-1" data-idx="1" href="#en-1">1. What is D_Replicator?</a>
+      <a class="nl" data-target="en-2" data-idx="2" href="#en-2">2. Installation</a>
+      <a class="nl" data-target="en-3" data-idx="3" href="#en-3">3. Your first replication — 3 steps</a>
+      <a class="nl" data-target="en-4" data-idx="4" href="#en-4">4. The three pieces</a>
+      <a class="nl" data-target="en-5" data-idx="5" href="#en-5">5. Language (Japanese / English)</a>
+
+      <!-- Part 2　Reference -->
+      <div class="grp"><span class="gk">PART 2</span>Part 2　Reference</div>
+      <a class="nl" data-target="en-7" data-idx="7" href="#en-7">6. Placement modes</a>
+      <a class="nl" data-target="en-8" data-idx="8" href="#en-8">7. Sources</a>
+      <a class="nl" data-target="en-9" data-idx="9" href="#en-9">8. Step Transform</a>
+      <a class="nl" data-target="en-10" data-idx="10" href="#en-10">9. Modulators (Random / Step / Time)</a>
+      <a class="nl" data-target="en-11" data-idx="11" href="#en-11">10. Field — localize effects</a>
+      <a class="nl" data-target="en-12" data-idx="12" href="#en-12">11. Cloning lights</a>
+      <a class="nl" data-target="en-13" data-idx="13" href="#en-13">12. Keyframes / Animation</a>
+      <a class="nl" data-target="en-14" data-idx="14" href="#en-14">13. Nesting &amp; "Dissolve Top"</a>
+      <a class="nl" data-target="en-15" data-idx="15" href="#en-15">14. Realize / Expand to Objects</a>
+      <a class="nl" data-target="en-16" data-idx="16" href="#en-16">15. About seeds</a>
+      <a class="nl" data-target="en-17" data-idx="17" href="#en-17">16. Troubleshooting / Known limits</a>
+    </div>
+  </nav>
+
+  <!-- ── 右:本文。各章は「章: ○○」コメントが目印(章ごとに編集できます) ── -->
+  <main>
+    <!-- 本文(日本語) -->
+    <div class="doc doc-ja ja">
+      <!-- ════════════ 章: 1. D_Replicator とは ════════════ -->
+      <section id="ja-1" data-idx="1">
+        <div class="shead">
+          <div class="kick">QUICK START</div>
+          <h1>1. D_Replicator とは</h1>
+        </div>
+        <p>D_Replicator は、1つのオブジェクトを<b>何百〜何千個</b>に複製し、その並びと動きを<b>リアルタイムにプレビューしながら</b>作れる Blender アドオンです。</p>
+        <ul>
+          <li><b>非破壊</b> — 元のオブジェクトはそのまま。設定を変えれば即座に反映されます。</li>
+          <li><b>軽量</b> — 実体を大量に作らず「表示専用」で描画するので、数千個でも軽快です。</li>
+          <li><b>直感的</b> — 追加した瞬間から扱いやすい初期状態。自然に作り込めます。</li>
+        </ul>
+        <p>モーショングラフィックス、配列・群衆、装飾、背景の作り込み、ループアニメーションなどに向いています。</p>
+        <div class="callout note"><span class="tag">NOTE</span>本マニュアルは <b>第1部 クイックスタート</b>(まず使えるように)と <b>第2部 リファレンス</b>(全機能の詳細)の2部構成です。</div>
+      </section>
+
+      <!-- ════════════ 章: 2. インストール ════════════ -->
+      <section id="ja-2" data-idx="2">
+        <div class="shead">
+          <div class="kick">QUICK START</div>
+          <h1>2. インストール</h1>
+        </div>
+        <p>Blender <b>5.1 推奨</b>(4.2 以降で動作)。Windows / macOS 対応。レンダラーは EEVEE / Cycles。</p>
+        <ul>
+          <li><b>編集 ▸ プリファレンス ▸ 拡張機能(Get Extensions)</b> を開く</li>
+          <li>右上の <b>▼ ▸ ディスクからインストール…</b> を選ぶ</li>
+          <li>配布された <b>D_Replicator-x.x.x.zip</b> を選択する</li>
+          <li>一覧の <b>D_Replicator</b> にチェックを入れて有効化する</li>
+          <li><b>3D ビューポート ▸ サイドバー(N キー) ▸ Replicator</b> タブが表示されます</li>
+        </ul>
+        <div class="callout warn"><span class="tag">CAUTION</span><b>有効化できないとき</b>: いったん Blender を再起動してください。それでも直らない場合は、セキュリティソフトで Blender の拡張機能フォルダを除外設定にしてから入れ直すと確実です。</div>
+      </section>
+
+      <!-- ════════════ 章: 3. はじめての複製 — 3ステップ ════════════ -->
+      <section id="ja-3" data-idx="3">
+        <div class="shead">
+          <div class="kick">QUICK START</div>
+          <h1>3. はじめての複製 — 3ステップ</h1>
+        </div>
+        <ul>
+          <li><b>① 複製したいオブジェクトを選択</b>(例: 立方体)</li>
+          <li><b>② N パネル ▸ Replicator ▸「Replicator を追加」</b>を押す</li>
+          <li><b>③</b> 既定で <b>グリッド 3×3×3 / 間隔 200cm</b> の複製が出ます</li>
+        </ul>
+        <p>あとは「数」「間隔」「モード」などを変えると<b>即座に反映</b>されます。元のオブジェクト(複製元)はクローンとして表示されるため自動的に隠れます。</p>
+      </section>
+
+      <!-- ════════════ 章: 4. 画面の見かた(3つの要素) ════════════ -->
+      <section id="ja-4" data-idx="4">
+        <div class="shead">
+          <div class="kick">QUICK START</div>
+          <h1>4. 画面の見かた(3つの要素)</h1>
+        </div>
+        <p>「Replicator を追加」すると、内部的に3つの要素ができます。ふだん操作するのは <b>Replicator 本体</b>です。</p>
+        <div class="tw">
+          <table>
+            <thead><tr><th>要素</th><th>役割</th><th>操作</th></tr></thead>
+            <tbody>
+            <tr><td>Replicator 本体</td><td>パラメータを持つ親</td><td>これを選んで N パネルで調整</td></tr>
+            <tr><td>Replicator_Display</td><td>全クローンの表示オブジェクト</td><td>これを動かすとクローン全体が移動</td></tr>
+            <tr><td>複製元(子)</td><td>クローンの元になるオブジェクト</td><td>一覧から追加・並べ替え・削除</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>パラメータはすべて Replicator 本体に保存され、ファイルを保存・再読込しても残ります。</p>
+      </section>
+
+      <!-- ════════════ 章: 5. 言語の切り替え(日本語 / English) ════════════ -->
+      <section id="ja-5" data-idx="5">
+        <div class="shead">
+          <div class="kick">QUICK START</div>
+          <h1>5. 言語の切り替え(日本語 / English)</h1>
+        </div>
+        <p>パネル最上部の <b>「日本語」「English」</b>ボタンで、<b>この Replicator パネルだけ</b>を切り替えられます。</p>
+        <ul>
+          <li><b>Blender 全体の言語設定には一切影響しません</b>(独自の翻訳でパネル描画時にだけ訳します)。</li>
+          <li>設定はセッション内で有効です(Blender 再起動・別ファイルを開くと既定の日本語に戻ります)。</li>
+          <li>マウスオーバーの説明文(ツールチップ)の一部は日本語のままです(現状の制限)。</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 6. 配置モード ════════════ -->
+      <section id="ja-7" data-idx="7">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>6. 配置モード</h1>
+        </div>
+        <p>クローンをどう並べるかを決めます。モードによって表示されるパラメータが変わります。</p>
+        <div class="tw">
+          <table>
+            <thead><tr><th>モード</th><th>主なパラメータ</th></tr></thead>
+            <tbody>
+            <tr><td>グリッド</td><td>数 X / Y / Z、間隔(cm)X / Y / Z</td></tr>
+            <tr><td>リニア</td><td>数、1ステップの移動(cm)X / Y / Z</td></tr>
+            <tr><td>放射</td><td>数、半径(=間隔X / シンプルな円周)</td></tr>
+            <tr><td>円形</td><td>数、半径(cm)、平面(XY/XZ/YZ)、角度(度)、軸を外向きに揃える</td></tr>
+            <tr><td>メッシュ</td><td>参照メッシュ、配置先(頂点/辺/面/面上ランダム)、法線に揃える、揃える軸、変形後に追従</td></tr>
+            <tr><td>スプライン</td><td>参照スプライン(カーブ)、数、接線に揃える、揃える軸</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>数の上限(セーフティ)</h2>
+        <p>各モードの「数」は、<b>セーフティ ON(既定)で最大 100</b>、<b>OFF で最大 1000</b> まで入れられます。</p>
+        <div class="callout warn"><span class="tag">CAUTION</span>セーフティを外して大きな数にすると Blender が落ちる場合があります(特にグリッドは X×Y×Z で激増)。重い設定は少しずつ上げて様子を見てください。セーフティを ON に戻すと 100 超の数は 100 に丸められます。</div>
+        <h2>メッシュモード(任意のメッシュ表面に配置)</h2>
+        <p>任意のメッシュを「土台」にして、その <b>頂点 / 辺の中心 / 面の中心 / 面上ランダム</b> にクローンを配置します。</p>
+        <ul>
+          <li><b>参照メッシュ</b>: 土台にするメッシュ(<b>複製元とは別物</b>)。</li>
+          <li><b>面上ランダム(散布)</b>: 面の上に<b>面積重み</b>で散らばせます(大きい面ほど多く乗る)。<b>散布率</b>(0〜1000%)とシードで密度・パターンを調整。散布率は前から増減するので、率を上げ下げしても既存の点は動きません(密度アニメ向き)。</li>
+          <li><b>法線に揃える</b>: クローンの軸を頂点/面の法線方向へ向けます。</li>
+          <li><b>揃える軸</b>: 法線へ向けるローカル軸を X/Y/Z/-X/-Y/-Z から選択。</li>
+          <li><b>変形後に追従(評価メッシュ)</b>: 参照に付けたモディファイヤや変形を適用した後の形に乗せます(重いので必要な時だけ)。</li>
+        </ul>
+        <h2>スプラインモード(カーブに沿って配置)</h2>
+        <p>カーブに沿って、クローンを<b>弧長で等間隔</b>に並べます。<b>接線に揃える</b>で進行方向へ向けられます。閉じたカーブにも対応。</p>
+        <div class="callout note"><span class="tag">NOTE</span>現状、複数のスプラインを持つカーブは<b>最初の1本</b>にのみ配置します。</div>
+      </section>
+
+      <!-- ════════════ 章: 7. 複製元(参照オブジェクト) ════════════ -->
+      <section id="ja-8" data-idx="8">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>7. 複製元(参照オブジェクト)</h1>
+        </div>
+        <p>複製の「元」になるオブジェクトです。<b>メッシュ / ライト / 別の Replicator(入れ子)</b>を使えます。複数登録もできます。</p>
+        <ul>
+          <li><b>追加</b>: 対象を選択して「Replicator を追加」、または Replicator をアクティブにして「選択を複製元に追加」。</li>
+          <li><b>一覧操作</b>: パネルの複製元一覧から 選択 / 並べ替え(↑↓)/ 削除。</li>
+        </ul>
+        <h2>複数オブジェクトの分配 — ランダム / 規則的</h2>
+        <p>複製元を2つ以上入れると、各クローンへどう割り当てるかを選べます。</p>
+        <ul>
+          <li><b>ランダム</b>: シードで各クローンにランダム割り当て。🔁(振り直し)で別の組み合わせを探せます。</li>
+          <li><b>規則的(順番)</b>: 0,1,2,0,1,2… と順番に繰り返し割り当て。</li>
+          <li><b>並べ替え = 割り当て順</b>: 複製元一覧の <b>↑↓</b> で順番を変えると、複製の割り当て順もそれに追従します(規則的モードで効果が分かりやすい)。</li>
+        </ul>
+        <h2>複製元の位置はロックされます</h2>
+        <p>「複製元を表示(編集用)」をオンにすると複製元が編集のため一時表示されますが、<b>位置は常にロック</b>されます(誤って動かしてクローンがズレるのを防ぐため)。</p>
+        <div class="callout note"><span class="tag">NOTE</span>クローン全体を移動したいときは、<b>「Replicator_Display を選択」</b>ボタンで表示オブジェクトを選び、それを動かします(複製元ではなく Replicator_Display で位置を編集)。</div>
+        <div class="callout warn"><span class="tag">CAUTION</span>「複製元を表示」を ON のままにすると、複製元自体がレンダーに写ります。レンダー前は OFF にしてください。</div>
+      </section>
+
+      <!-- ════════════ 章: 8. 段階トランスフォーム(複製ごとの変化) ════════════ -->
+      <section id="ja-9" data-idx="9">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>8. 段階トランスフォーム(複製ごとの変化)</h1>
+        </div>
+        <p>位置・回転・スケールを<b>複製ごとに</b>少しずつ変化させます。Replicator 本体に内蔵された機能です。</p>
+        <ul>
+          <li><b>正規化(端→端 0→1)</b>(既定 ON): 値は「最後のクローンでの変化量」。クローン数を増やしても破綻しません。</li>
+          <li>OFF にすると<b>累積</b>になります(数が多いほど変化が大きくなります)。</li>
+          <li>スケールは下限(0.001)で制限し、負やゼロになって反転するのを防いでいます。</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 9. モジュレーター(ランダム / 段階 / 時間) ════════════ -->
+      <section id="ja-10" data-idx="10">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>9. モジュレーター(ランダム / 段階 / 時間)</h1>
+        </div>
+        <p>クローンに効果を与える「変調器」をリストで<b>複数積めます</b>。上から順に適用され、効果は加算合成されます。</p>
+        <ul>
+          <li><b>追加</b>: 「+ Random」「+ Step」「+ Time」ボタン。置いた瞬間それらしく動く初期値入り。</li>
+          <li><b>並べ替え / 削除 / ON・OFF</b>: リスト右の ▲▼ / − ボタン、各行のチェック。</li>
+          <li>共通: <b>位置(cm)/ 回転(度)/ スケール / 強度</b>。</li>
+        </ul>
+        <div class="tw">
+          <table>
+            <thead><tr><th>種類</th><th>挙動</th></tr></thead>
+            <tbody>
+            <tr><td>Random</td><td>クローンごとにランダム。シード + 🔁(振り直し)で好みの結果を探す</td></tr>
+            <tr><td>Step</td><td>クローン列に沿った勾配(0→1)。正規化 ON で数に依らず安定</td></tr>
+            <tr><td>Time</td><td>時間で累積(キーフレーム不要)。速度で量を調整。回転に入れれば回り続ける</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><b>時間ランダム</b>(Time): クローンごとに時間の進みをばらつかせ、位相をずらした有機的な動きにできます(シードは Random と共用)。</p>
+        <div class="callout note"><span class="tag">NOTE</span>各モジュレーターの<b>「フィールドで絞る」</b>を ON にすると、そのモジュレーターだけが共有の範囲(フィールド)で局所化されます(次章)。</div>
+      </section>
+
+      <!-- ════════════ 章: 10. 範囲(フィールド)— 効果を範囲で絞る ════════════ -->
+      <section id="ja-11" data-idx="11">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>10. 範囲(フィールド)— 効果を範囲で絞る</h1>
+        </div>
+        <p><b>範囲の中にいるクローンだけ効果が効く</b>ように、クローンごとに 0〜1 の重みを掛けます(外は効果ゼロ)。共有フィールドが1つあり、「フィールドで絞る」を ON にした対象だけが局所化されます。</p>
+        <ul>
+          <li><b>追加</b>: 「フィールド」行の右の力場アイコンでギズモ(エンプティ)が出ます。</li>
+          <li><b>操作</b>: ギズモを 移動(G)/ 回転(R)/ スケール(S)。動かすとクローンがリアルタイムに反応します。</li>
+          <li><b>種類</b>: 球 / 箱 / 方向(リニア)/ ノイズ。位置・向き・大きさはギズモ基準。</li>
+          <li><b>反転</b>: 内と外を入れ替え。</li>
+        </ul>
+        <h2>減衰をベジエ曲線で制御</h2>
+        <p><b>「カーブで減衰を制御」</b>を ON にすると、効きの強さ(芯=1 → 外=0)を<b>ベジエ曲線で自由に編集</b>できます。点を足して、急に切る/滑らかに伸ばす/谷を作る、などが思いのままです。</p>
+        <div class="callout note"><span class="tag">NOTE</span>球フィールドは等方なので回転しても同形です。向きを付けたいときは 箱 / 方向 / ノイズ を使ってください。</div>
+      </section>
+
+      <!-- ════════════ 章: 11. ライトの複製 ════════════ -->
+      <section id="ja-12" data-idx="12">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>11. ライトの複製</h1>
+        </div>
+        <p>ライト(ポイント/スポット/エリア/サン)を複製元にすると、<b>各クローン位置から実際に照らすライト</b>が出ます(EEVEE 4.2+ / Cycles で確認)。</p>
+        <ul>
+          <li>配置モード・モジュレーター・フィールド・キーフレームもそのまま効くので、<b>光のリング・光の道・面に散らした照明</b>などが作れます。</li>
+          <li><b>元のライト1つを編集</b>すれば全クローンに反映(色・強さ・スポット角など)。</li>
+          <li>ライトは重いので、数を増やしすぎると遅くなります。</li>
+        </ul>
+        <div class="callout warn"><span class="tag">CAUTION</span><b>「ジオメトリ化(Realize)」ではライトは出ません</b>(形状を持たないため)。クローンライトは Realize <b>OFF</b>(既定)で使ってください。</div>
+      </section>
+
+      <!-- ════════════ 章: 12. キーフレーム / アニメーション ════════════ -->
+      <section id="ja-13" data-idx="13">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>12. キーフレーム / アニメーション</h1>
+        </div>
+        <p>ほぼ全パラメータをアニメーションできます。各パラメータの右の<b>菱形ボタン(◆)</b>で現在フレームにキーを打つ/消せます(標準の I キーや右クリックでも可)。</p>
+        <ul>
+          <li>キーを打てる例: <b>間隔・半径</b>(伸縮アニメ)、<b>段階トランスフォーム</b>、<b>各モジュレーター</b>、<b>基準スケール</b>、<b>散布率</b>(密度アニメ)、<b>フィールド</b>(半径/位置/角度)。</li>
+          <li><b>フィールド位置をキー</b>すると、範囲が掃くように動き、通った所のクローンが順に反応します。</li>
+          <li>再生・スクラブ・レンダーで毎フレーム再計算されます(キー不要の Time モジュレーターと併用も可)。</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 13. 入れ子と「最上位を解除」 ════════════ -->
+      <section id="ja-14" data-idx="14">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>13. 入れ子と「最上位を解除」</h1>
+        </div>
+        <p>既存の Replicator を別の Replicator の複製元にすると<b>入れ子</b>になります。組み合わせるだけで複雑な表現を直感的に作れます。<b>完全に非破壊</b>で、内側を変えると外側も自動的に更新されます。</p>
+        <h2>最上位を解除(本体だけ削除)</h2>
+        <p>入れ子の<b>最上位 Replicator だけ</b>を削除し、中身(子 Replicator や複製元)は<b>構造を保ったまま独立</b>させます。</p>
+        <ul>
+          <li>ボタンは<b>最上位の入れ子のとき</b>(親が Replicator でない & 子に Replicator を含む)にだけ出ます。</li>
+          <li>ワールド位置は維持されます。構造を壊さず最上位だけ外したいときに使います。</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 14. 実体化(Realize)/ 個別に展開 ════════════ -->
+      <section id="ja-15" data-idx="15">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>14. 実体化(Realize)/ 個別に展開</h1>
+        </div>
+        <p>クローンは既定では「インスタンス」です。通常のモディファイヤをかけたり、実オブジェクトに書き出したいときは次の方法を使います。</p>
+        <ul>
+          <li><b>クローン1個ずつ変形</b>(全部同じ形に曲げる等): <b>複製元</b>にモディファイヤを付ける(適用後の形が複製されます)。</li>
+          <li><b>集合体全体を変形</b>(全体を曲げる等): <b>「出力をジオメトリ化(Realize)」を ON</b> → Replicator_Display にモディファイヤを追加。</li>
+          <li><b>個別に展開(オブジェクト化)</b>: 現在の複製状態を<b>編集可能な実オブジェクト</b>として個別に書き出します(非破壊・元はそのまま)。新しいコレクション「&lt;名前&gt;_Expanded」に並びます。</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 15. シードについて ════════════ -->
+      <section id="ja-16" data-idx="16">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>15. シードについて</h1>
+        </div>
+        <p>各ランダムのパターンを決める値です。<b>分配シード / モジュレーターのシード / 散布シード</b>があり、🔁 で振り直して好みの結果を探せます。</p>
+        <ul>
+          <li>シードの既定値は <b>123456</b> です。</li>
+          <li><b>マイナスは入力できません</b>(0 以上)。古いファイルにマイナスが保存されていても、内部で正規化されるので問題なく開けます。</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 16. 困ったとき / 既知の制限 ════════════ -->
+      <section id="ja-17" data-idx="17">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>16. 困ったとき / 既知の制限</h1>
+        </div>
+        <ul>
+          <li><b>レンダーで複製元が写る</b> → 「複製元を表示」を OFF に。</li>
+          <li><b>クローンが消える / 反応が鈍い</b> → パネルの「更新」ボタン、またはフレームを送ると再計算されます。</li>
+          <li><b>メッシュ/スプラインの変形が即反映されない</b> → フレーム送りか「更新」で反映(変形アニメは再生で追従します)。</li>
+          <li><b>スプライン</b>: 複数本のカーブは最初の1本のみ。</li>
+          <li><b>フィールド</b>: 現状1個まで(複数ブレンドは今後)。</li>
+          <li><b>ツールチップ(説明文)</b>: 英語 UI でも一部は日本語のままです。</li>
+        </ul>
+        <div class="callout note"><span class="tag">NOTE</span>これは Beta 版です。不具合・要望は Discord でお寄せください。アップデートで改善していきます。</div>
+      </section>
+    </div>
+    <!-- 本文(English) -->
+    <div class="doc doc-en en">
+      <!-- ════════════ 章: 1. What is D_Replicator? ════════════ -->
+      <section id="en-1" data-idx="1">
+        <div class="shead">
+          <div class="kick">QUICK START</div>
+          <h1>1. What is D_Replicator?</h1>
+        </div>
+        <p>D_Replicator is a Blender add-on that clones an object into <b>hundreds to thousands</b> of copies and lets you build their layout and motion <b>with real-time preview</b>.</p>
+        <ul>
+          <li><b>Non-destructive</b> — the original object is untouched; changes apply instantly.</li>
+          <li><b>Lightweight</b> — it draws a display-only mesh instead of creating real objects, so thousands stay fast.</li>
+          <li><b>Intuitive</b> — good defaults the moment you add it; it builds up naturally.</li>
+        </ul>
+        <p>Great for motion graphics, arrays/crowds, decoration, set dressing, and looping animation.</p>
+        <div class="callout note"><span class="tag">NOTE</span>This manual has two parts: <b>Part 1 Quick Start</b> (get going) and <b>Part 2 Reference</b> (every feature).</div>
+      </section>
+
+      <!-- ════════════ 章: 2. Installation ════════════ -->
+      <section id="en-2" data-idx="2">
+        <div class="shead">
+          <div class="kick">QUICK START</div>
+          <h1>2. Installation</h1>
+        </div>
+        <p>Blender <b>5.1 recommended</b> (works on 4.2+). Windows / macOS. Renderer: EEVEE / Cycles.</p>
+        <ul>
+          <li>Open <b>Edit ▸ Preferences ▸ Get Extensions</b></li>
+          <li>Top-right <b>▼ ▸ Install from Disk…</b></li>
+          <li>Pick the supplied <b>D_Replicator-x.x.x.zip</b></li>
+          <li>Enable <b>D_Replicator</b> in the list</li>
+          <li>The panel appears at <b>3D Viewport ▸ Sidebar (N) ▸ Replicator</b></li>
+        </ul>
+        <div class="callout warn"><span class="tag">CAUTION</span><b>If it will not enable</b>: restart Blender first. If it still fails, add Blender's extensions folder to your antivirus exclusions and reinstall.</div>
+      </section>
+
+      <!-- ════════════ 章: 3. Your first replication — 3 steps ════════════ -->
+      <section id="en-3" data-idx="3">
+        <div class="shead">
+          <div class="kick">QUICK START</div>
+          <h1>3. Your first replication — 3 steps</h1>
+        </div>
+        <ul>
+          <li><b>① Select an object</b> to clone (e.g. a cube)</li>
+          <li><b>② Press N panel ▸ Replicator ▸ "Add Replicator"</b></li>
+          <li><b>③</b> You get a <b>Grid 3×3×3 / 200cm spacing</b> by default</li>
+        </ul>
+        <p>Change Count, Spacing, or Mode and it updates <b>instantly</b>. The source is hidden automatically because it is shown as clones.</p>
+      </section>
+
+      <!-- ════════════ 章: 4. The three pieces ════════════ -->
+      <section id="en-4" data-idx="4">
+        <div class="shead">
+          <div class="kick">QUICK START</div>
+          <h1>4. The three pieces</h1>
+        </div>
+        <p>Adding a Replicator creates three pieces internally. You normally edit the <b>Replicator</b>.</p>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Piece</th><th>Role</th><th>How you use it</th></tr></thead>
+            <tbody>
+            <tr><td>Replicator</td><td>The parent that holds all parameters</td><td>Select it and adjust in the N panel</td></tr>
+            <tr><td>Replicator_Display</td><td>The object that displays all clones</td><td>Move it to move all clones</td></tr>
+            <tr><td>Sources (children)</td><td>The objects clones are made from</td><td>Add / reorder / remove in the list</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>All parameters live on the Replicator itself, so they survive saving and reopening the file.</p>
+      </section>
+
+      <!-- ════════════ 章: 5. Language (Japanese / English) ════════════ -->
+      <section id="en-5" data-idx="5">
+        <div class="shead">
+          <div class="kick">QUICK START</div>
+          <h1>5. Language (Japanese / English)</h1>
+        </div>
+        <p>The <b>日本語 / English</b> buttons at the top switch <b>only this Replicator panel</b>.</p>
+        <ul>
+          <li>It does <b>not</b> change Blender's overall interface language.</li>
+          <li>The setting lasts for the session (resets to default on restart / opening another file).</li>
+          <li>Some tooltips remain in Japanese (current limitation).</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 6. Placement modes ════════════ -->
+      <section id="en-7" data-idx="7">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>6. Placement modes</h1>
+        </div>
+        <p>Decide how clones are arranged. Parameters shown depend on the mode.</p>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Mode</th><th>Main parameters</th></tr></thead>
+            <tbody>
+            <tr><td>Grid</td><td>Count X / Y / Z, Spacing (cm) X / Y / Z</td></tr>
+            <tr><td>Linear</td><td>Count, step move (cm) X / Y / Z</td></tr>
+            <tr><td>Radial</td><td>Count, radius (simple circle)</td></tr>
+            <tr><td>Circle</td><td>Count, radius (cm), plane (XY/XZ/YZ), angle (deg), align outward</td></tr>
+            <tr><td>Mesh</td><td>Reference mesh, placement (verts/edges/faces/surface), align to normal, axis, follow deformed</td></tr>
+            <tr><td>Spline</td><td>Reference spline (curve), count, align to tangent, axis</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>Count limit (safety)</h2>
+        <p>Count is capped at <b>100 with Safety ON</b> (default) and <b>1000 with it OFF</b>.</p>
+        <div class="callout warn"><span class="tag">CAUTION</span>Very high counts can crash Blender (Grid explodes as X×Y×Z). Raise heavy settings gradually. Turning Safety back ON rounds counts above 100 down to 100.</div>
+        <h2>Mesh mode (place on any surface)</h2>
+        <p>Use any mesh as a base and place clones on its <b>vertices / edge centers / face centers / random surface scatter</b>.</p>
+        <ul>
+          <li><b>Reference mesh</b>: the base (separate from the source being cloned).</li>
+          <li><b>Surface scatter</b>: area-weighted random placement (bigger faces get more). <b>Amount</b> (0–1000%) and seed control density/pattern; points are added from the front so changing the rate keeps existing points fixed (good for density animation).</li>
+          <li><b>Align to normal</b> / <b>Align axis</b>: aim a chosen local axis along the vertex/face normal.</li>
+          <li><b>Follow deformed</b>: place on the shape after the reference's modifiers/deformation (heavier).</li>
+        </ul>
+        <h2>Spline mode</h2>
+        <p>Place clones <b>evenly by arc length</b> along a curve. <b>Align to tangent</b> faces them along travel direction. Closed curves supported.</p>
+        <div class="callout note"><span class="tag">NOTE</span>Currently only the first spline of a multi-spline curve is used.</div>
+      </section>
+
+      <!-- ════════════ 章: 7. Sources ════════════ -->
+      <section id="en-8" data-idx="8">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>7. Sources</h1>
+        </div>
+        <p>The objects clones are made from: <b>mesh / light / another Replicator (nesting)</b>. Multiple allowed.</p>
+        <ul>
+          <li><b>Add</b>: select and "Add Replicator", or make the Replicator active and "Add Selected as Source".</li>
+          <li><b>List</b>: select / reorder (↑↓) / remove from the panel list.</li>
+        </ul>
+        <h2>Distribution — Random / Iterate</h2>
+        <p>When you register two or more sources, you can choose how each clone is assigned one.</p>
+        <ul>
+          <li><b>Random</b>: assign each clone a source by seed; 🔁 to reroll combinations.</li>
+          <li><b>Iterate (regular)</b>: assign 0,1,2,0,1,2… in order.</li>
+          <li><b>Reorder = assignment order</b>: the ↑↓ in the source list change which source each clone gets (clearest in Iterate mode).</li>
+        </ul>
+        <h2>Source positions are locked</h2>
+        <p>Turning on "Show Sources" reveals sources for editing, but their <b>position is always locked</b> (to avoid accidentally shifting the clones).</p>
+        <div class="callout note"><span class="tag">NOTE</span>To move all clones, use the <b>"Select Replicator_Display"</b> button and move that object instead.</div>
+        <div class="callout warn"><span class="tag">CAUTION</span>Leaving "Show Sources" ON renders the sources too. Turn it OFF before rendering.</div>
+      </section>
+
+      <!-- ════════════ 章: 8. Step Transform ════════════ -->
+      <section id="en-9" data-idx="9">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>8. Step Transform</h1>
+        </div>
+        <p>Shift position/rotation/scale <b>progressively per clone</b>. Built into the Replicator.</p>
+        <ul>
+          <li><b>Normalize (end-to-end 0→1)</b> (default ON): the value is the change at the last clone, so it stays sane as count grows.</li>
+          <li>OFF accumulates (dramatic with high counts). Scale is clamped (0.001) to avoid flips.</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 9. Modulators (Random / Step / Time) ════════════ -->
+      <section id="en-10" data-idx="10">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>9. Modulators (Random / Step / Time)</h1>
+        </div>
+        <p>Stack multiple modulators; they apply top-to-bottom and add together.</p>
+        <ul>
+          <li><b>Add</b>: the "+ Random" / "+ Step" / "+ Time" buttons — each lands with sensible defaults so it animates immediately.</li>
+          <li><b>Reorder / remove / on-off</b>: the ▲▼ / − buttons on the right of the list, and the checkbox on each row.</li>
+          <li>Common to all: <b>position (cm) / rotation (deg) / scale / strength</b>.</li>
+        </ul>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Type</th><th>Behaviour</th></tr></thead>
+            <tbody>
+            <tr><td>Random</td><td>Random per clone. Seed + 🔁 to explore</td></tr>
+            <tr><td>Step</td><td>Gradient along the clone sequence (0→1)</td></tr>
+            <tr><td>Time</td><td>Accumulates over time (no keyframes); Speed controls amount</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><b>Time Random</b> scatters each clone's time progression for organic, out-of-phase motion (seed shared with Random).</p>
+        <div class="callout note"><span class="tag">NOTE</span>Turn on <b>"Mask by Field"</b> on a modulator to localize just that modulator with the shared field (next section).</div>
+      </section>
+
+      <!-- ════════════ 章: 10. Field — localize effects ════════════ -->
+      <section id="en-11" data-idx="11">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>10. Field — localize effects</h1>
+        </div>
+        <p>Multiplies each clone by a 0–1 weight so <b>only clones inside the field are affected</b>. One shared field; only targets with "Mask by Field" ON are localized.</p>
+        <ul>
+          <li><b>Add</b>: the force-field icon on the "Field" row creates a gizmo (empty).</li>
+          <li><b>Move (G) / Rotate (R) / Scale (S)</b> the gizmo — clones react live.</li>
+          <li><b>Types</b>: Sphere / Box / Linear (direction) / Noise. <b>Invert</b> swaps inside/outside.</li>
+        </ul>
+        <h2>Bezier falloff curve</h2>
+        <p>Turn on <b>"Falloff Curve"</b> to edit the strength (core 1 → edge 0) with a <b>free Bezier curve</b> — add points for hard cuts, smooth ramps, or valleys.</p>
+        <div class="callout note"><span class="tag">NOTE</span>A sphere field is isotropic (rotation does nothing). Use box / linear / noise for direction.</div>
+      </section>
+
+      <!-- ════════════ 章: 11. Cloning lights ════════════ -->
+      <section id="en-12" data-idx="12">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>11. Cloning lights</h1>
+        </div>
+        <p>Use a light (point/spot/area/sun) as a source and each clone <b>actually illuminates</b> (verified on EEVEE 4.2+ / Cycles).</p>
+        <ul>
+          <li>Placement, modulators, field and keyframes all apply — make light rings, light paths, scattered lighting.</li>
+          <li>Edit the single source light to update all clones (color, power, spot angle…).</li>
+          <li>Lights are heavy; too many will slow down.</li>
+        </ul>
+        <div class="callout warn"><span class="tag">CAUTION</span><b>Lights do not appear when Realized</b> (they have no geometry). Keep Realize <b>OFF</b> for clone lights.</div>
+      </section>
+
+      <!-- ════════════ 章: 12. Keyframes / Animation ════════════ -->
+      <section id="en-13" data-idx="13">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>12. Keyframes / Animation</h1>
+        </div>
+        <p>Almost every parameter animates. The <b>diamond button (◆)</b> next to a parameter inserts/removes a key at the current frame (standard I key / right-click also work).</p>
+        <ul>
+          <li>Keyable: <b>spacing/radius</b> (grow/shrink), <b>step transform</b>, <b>each modulator</b>, <b>base scale</b>, <b>scatter amount</b> (density), <b>field</b> (radius/position/angle).</li>
+          <li><b>Keying the field position</b> sweeps the area; clones react in turn as it passes.</li>
+          <li>Recomputed every frame on play/scrub/render (combine with the keyframe-free Time modulator).</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 13. Nesting & "Dissolve Top" ════════════ -->
+      <section id="en-14" data-idx="14">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>13. Nesting &amp; "Dissolve Top"</h1>
+        </div>
+        <p>Make a Replicator a source of another to <b>nest</b> them — complex results emerge just by combining. Fully <b>non-destructive</b>: editing the inner one updates the outer automatically.</p>
+        <h2>Dissolve Top</h2>
+        <p>Deletes <b>only the outermost Replicator</b> while keeping its contents (inner Replicators / sources) <b>as an independent structure</b>. World positions are preserved. The button appears only on the top of a nest.</p>
+      </section>
+
+      <!-- ════════════ 章: 14. Realize / Expand to Objects ════════════ -->
+      <section id="en-15" data-idx="15">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>14. Realize / Expand to Objects</h1>
+        </div>
+        <p>Clones are instances by default. Use the following when you need real modifiers or actual objects.</p>
+        <ul>
+          <li><b>Deform each clone</b> (bend identically, etc.): add a modifier to the <b>source</b>.</li>
+          <li><b>Deform the whole group</b>: turn on <b>"Realize Output"</b>, then add modifiers to Replicator_Display.</li>
+          <li><b>Expand to Objects</b>: bake the current state into <b>editable real objects</b> (non-destructive; original kept) in a new "&lt;name&gt;_Expanded" collection.</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 15. About seeds ════════════ -->
+      <section id="en-16" data-idx="16">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>15. About seeds</h1>
+        </div>
+        <p>Seeds drive the random patterns: <b>distribution seed / modulator seed / scatter seed</b>. Use 🔁 to reroll.</p>
+        <ul>
+          <li>Default seed value is <b>123456</b>.</li>
+          <li><b>Negatives cannot be entered</b> (min 0). Old files that stored a negative still open fine (normalized internally).</li>
+        </ul>
+      </section>
+
+      <!-- ════════════ 章: 16. Troubleshooting / Known limits ════════════ -->
+      <section id="en-17" data-idx="17">
+        <div class="shead">
+          <div class="kick">REFERENCE</div>
+          <h1>16. Troubleshooting / Known limits</h1>
+        </div>
+        <ul>
+          <li><b>Sources render</b> → turn "Show Sources" OFF.</li>
+          <li><b>Clones vanish / sluggish</b> → press "Refresh" or step a frame to recompute.</li>
+          <li><b>Mesh/spline edits not reflected instantly</b> → step a frame or "Refresh" (deformation animation follows on playback).</li>
+          <li><b>Spline</b>: only the first of multiple splines is used.</li>
+          <li><b>Field</b>: one field for now (multi-field blending later).</li>
+          <li><b>Tooltips</b>: some remain Japanese in the English UI.</li>
+        </ul>
+        <div class="callout note"><span class="tag">NOTE</span>This is a Beta. Please send bugs and requests on Discord — improvements ship in updates.</div>
+      </section>
+    </div>
+  </main>
+
+</div>
+
+<footer>D_Replicator v1.0.0 (Beta)  /  by Signal88.  /  GNU GPL v3+  /  support on Discord</footer>
+
+<!-- ===== 動作(JS):言語切替・章表示・検索。通常さわらなくてOK ===== -->
+<script>
+
+const body=document.body;
+function setLang(l){
+  body.classList.remove('ja','en');body.classList.add(l);
+  document.querySelectorAll('.lang button').forEach(b=>b.classList.toggle('on',b.dataset.lang===l));
+  try{localStorage.setItem('drlang',l)}catch(e){}
+  const cur=document.querySelector('section.on');                  // 同じ章を保つ。無ければ先頭の章へ
+  if(cur&&document.getElementById(l+'-'+cur.dataset.idx)){show(l+'-'+cur.dataset.idx,false);}
+  else{const f=document.querySelector('.nav-'+l+' .nl');if(f)show(f.dataset.target,false);}
+}
+function show(id,push){
+  const sec=document.getElementById(id);if(!sec)return;
+  const lang=id.split('-')[0];
+  document.querySelectorAll('.doc-'+lang+' section').forEach(s=>s.classList.toggle('on',s===sec));
+  document.querySelectorAll('.nav-'+lang+' .nl').forEach(a=>a.classList.toggle('on',a.dataset.target===id));
+  if(push)history.replaceState(null,'',new URL('#'+id,location).href);
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+document.querySelectorAll('.lang button').forEach(b=>b.onclick=()=>setLang(b.dataset.lang));
+document.querySelectorAll('.nl').forEach(a=>a.onclick=e=>{e.preventDefault();show(a.dataset.target,true)});
+function filt(q){                                            // サイドバーを絞り込み
+  q=(q||'').trim().toLowerCase();
+  const lang=body.classList.contains('en')?'en':'ja';
+  document.querySelectorAll('.nav-'+lang+' .nl').forEach(a=>{
+    a.style.display=(!q||a.textContent.toLowerCase().includes(q))?'':'none';
+  });
+}
+document.querySelectorAll('.search').forEach(s=>s.oninput=()=>filt(s.value));
+(function(){                                                 // 初期化(deep-link で言語も決定)
+  let l='ja';try{l=localStorage.getItem('drlang')||'ja'}catch(e){}
+  const h=location.hash.slice(1);
+  if(h.indexOf('en-')===0)l='en';else if(h.indexOf('ja-')===0)l='ja';
+  body.classList.remove('ja','en');body.classList.add(l);
+  document.querySelectorAll('.lang button').forEach(b=>b.classList.toggle('on',b.dataset.lang===l));
+  if(h&&document.getElementById(h)){show(h,false);}                // deep-link 優先、無ければ先頭の章(1. D_Replicator とは)
+  else{const f=document.querySelector('.nav-'+l+' .nl');if(f)show(f.dataset.target,false);}
+})();
+
+</script>
+</body>
+</html>
