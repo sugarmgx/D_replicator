@@ -80,4 +80,4 @@ tests/                 … ヘッドレス検証 + render_*.py
 
 **GNU General Public License v3.0 or later** (`SPDX:GPL-3.0-or-later`)。
 
-Copyright (C) 2026 D_plugins.
+Copyright (C) 2026 Signal88.

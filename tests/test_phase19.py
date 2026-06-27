@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # v0.11 テスト: 8新機能
 #   ① Time ランダム / ② 個別に展開 / ③ 入れ子の解除 / ④ フィールド減衰カーブ /
-#   ⑤ 複製元の位置ロック / ⑥ 非表示時の選択でエラーが出ない / ⑦ 規則的分配 / ⑧ 本体の緑表示
+#   ⑤ 複製元の位置ロック / ⑥ 非表示時の選択でエラーが出ない / ⑦ 規則的分配 / ⑧ 本体の表示(名前)
 # 実行: blender.exe --background --factory-startup --python tests/test_phase19.py
 import bpy
 import sys
@@ -305,13 +305,13 @@ def test_seed_robust():
     check("モジュレータシードも min=0", m.seed >= 0, "=%d" % m.seed)
 
 
-# ---------------------------------------------------------------- ⑧ 本体の緑表示
+# ---------------------------------------------------------------- ⑧ 本体の表示(緑は廃止・名前のみ)
 def test_green():
     clear()
     cube = mk_cube("cube")
     e = replicator.create_replicator(bpy.context, [cube])
     col = tuple(round(c, 2) for c in e.color)
-    check("本体カラーが緑", col == tuple(round(c, 2) for c in replicator.REP_GREEN), str(col))
+    check("本体カラーは既定(白)・緑は廃止", col == (1.0, 1.0, 1.0, 1.0), str(col))
     check("本体名を表示", e.show_name is True)
 
 

@@ -1,10 +1,10 @@
 schema_version = "1.0.0"
 
 id = "d_replicator"
-version = "0.11.7"
+version = "1.0.0"
 name = "D_Replicator"
 tagline = "Non-destructive mass-cloning & animation toolkit"
-maintainer = "D_plugins"
+maintainer = "Signal88."
 type = "add-on"
 
 website = "https://sgnl88.com/"
@@ -18,5 +18,5 @@ license = [
 ]
 
 copyright = [
-  "2026 D_plugins",
+  "2026 Signal88.",
 ]

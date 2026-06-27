@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: GPL-3.0-or-later
-# D_Replicator — 非破壊の大量複製 & アニメーション アドオン (by D_plugins)
-# Copyright (C) 2026 D_plugins
+# D_Replicator — 非破壊の大量複製 & アニメーション アドオン (by Signal88.)
+# Copyright (C) 2026 Signal88.
 # This program is free software: you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
 # Foundation, either version 3 of the License, or (at your option) any later
@@ -17,13 +17,13 @@
 #       Spline モード(カーブ上に弧長等間隔。接線揃え)、
 #       複製元にライト可(GN インスタンスとして実際に照らす = EEVEE Next / Cycles)、
 #       日英 i18n(ネイティブ翻訳辞書 + パネル上部の言語トグル)。
-# 対象: Blender 5.1
+# 対象: Blender 4.2 以降(5.1 推奨。開発・動作確認は 5.1、4.2.21 で簡易動作確認済み)
 
 bl_info = {
     "name": "D_Replicator",
-    "author": "D_plugins",
-    "version": (0, 11, 7),
-    "blender": (5, 1, 0),
+    "author": "Signal88.",
+    "version": (1, 0, 0),
+    "blender": (4, 2, 0),   # 最低バージョン(= manifest と一致)。5.1 推奨・5.1 で開発/検証。
     "location": "View3D > Sidebar > Replicator",
     "description": "オブジェクトを大量に複製してアニメーションする非破壊アドオン (Python 駆動インスタンシング)",
     "category": "Object",
@@ -463,9 +463,12 @@ def _apply_falloff(p, g):
             except Exception:
                 pass
             cv = m.curves[0]
-            out = np.fromiter((m.evaluate(cv, float(x)) for x in g),
-                              dtype=np.float32, count=len(g))
-            return np.clip(out, 0.0, 1.0)
+            # カーブ評価は Python 呼び出しで重い → 256 点の LUT を1度だけ作り np.interp で引く。
+            # (クローン数ぶん m.evaluate するとフィールド操作中に最大1000回/フレームで重くなるため)
+            xs = np.linspace(0.0, 1.0, 256)
+            lut = np.fromiter((m.evaluate(cv, float(x)) for x in xs),
+                              dtype=np.float32, count=256)
+            return np.clip(np.interp(g, xs, lut), 0.0, 1.0).astype(np.float32)
     return _shape(g, p.field_falloff)
 
 
@@ -672,19 +675,16 @@ def is_replicator_empty(ob):
     return bool(ob and ob.type == 'EMPTY' and p and p.is_replicator)
 
 
-REP_GREEN = (0.20, 1.00, 0.35, 1.0)   # Replicator 本体の表示色(緑)
-
-
 def _style_replicator(empty):
-    """Replicator 本体を緑表示 + 名前表示にして見分けやすくする(一度だけ)。
-    注: Blender はオブジェクト個別の『アウトライナー文字色』API を持たないため、
-    ビューポートのオブジェクトカラー(緑)+ 名前表示が最も近い表現。"""
-    if empty.get("_rep_styled"):
+    """Replicator 本体の名前をビューポートに表示して見分けやすくする(一度だけ)。
+    注: 以前は緑のオブジェクトカラーも付けていたが、既定の色モードでは見えず
+    紛らわしいため廃止。フラグを更新して既存 Replicator も既定色(白)へ戻す。"""
+    if empty.get("_rep_styled2"):
         return
-    empty["_rep_styled"] = True
+    empty["_rep_styled2"] = True
     try:
-        empty.color = REP_GREEN          # ビューポート「オブジェクト」カラー表示で緑
-        empty.show_name = True           # 本体名をビューポートに表示
+        empty.color = (1.0, 1.0, 1.0, 1.0)   # 既定色(白)。以前の緑オブジェクトカラーを解除
+        empty.show_name = True               # 本体名をビューポートに表示
     except Exception:
         pass
 
@@ -830,7 +830,7 @@ def apply_transforms(empty):
     display = get_display(empty)
     if not display:
         return
-    n_src = len(p.src_collection.objects) if p.src_collection else 0
+    n_src = len(_source_pairs(empty))   # GN がインスタンス化する複製元数。perm と同じ基準にして割当ズレを防ぐ
     pos, rot, scale = compute_clone_data(p, empty)
     idx = compute_index(p, len(pos), n_src, _source_permutation(empty))  # 並べ替え反映
     write_display(display, pos, rot, scale, idx)
@@ -874,7 +874,7 @@ def update_replicator(empty):
         return
     p = empty.replicator
     _migrate_to_stack(p)
-    _style_replicator(empty)   # 既存 Replicator にも緑表示を一度だけ適用
+    _style_replicator(empty)   # 既存 Replicator にも名前表示を一度だけ適用(緑は解除)
     display = get_display(empty)
     if not display:
         return
@@ -1153,7 +1153,7 @@ def create_replicator(context, sources=None):
     empty.empty_display_type = 'PLAIN_AXES'
     coll.objects.link(empty)
     empty.replicator.is_replicator = True
-    _style_replicator(empty)   # 本体を緑表示 + 名前表示で見分けやすく
+    _style_replicator(empty)   # 本体名を表示して見分けやすく
 
     src_col = bpy.data.collections.new(empty.name + "_Sources")
     # src_col はシーン(ビューレイヤー)にリンクしない = 複製元は単体表示/レンダーされない。
@@ -1674,7 +1674,7 @@ def _iter_fcurves(ad):
     if act is None:
         return
     legacy = getattr(act, "fcurves", None)
-    if legacy is not None:                         # 〜4.3: action.fcurves
+    if legacy is not None and len(legacy):         # 〜4.3 は action.fcurves。4.4+ で空ならスロット式へ落とす
         for fc in legacy:
             yield fc
         return
@@ -2371,6 +2371,7 @@ def register():
         name="言語", description="Replicator パネルの表示言語(Blender 全体には影響しません)",
         items=[('JA', "日本語", "日本語で表示"), ('EN', "English", "Show in English")],
         default='JA')
+    _field_sig.clear(); _ref_sig.clear(); _curve_sig.clear()   # 名前キーのキャッシュをリセット(名前再利用での誤判定・リーク防止)
     for handlers, fn in ((bpy.app.handlers.frame_change_post, _frame_handler),
                          (bpy.app.handlers.depsgraph_update_post, _depsgraph_handler),
                          (bpy.app.handlers.load_post, _load_handler)):
@@ -2392,6 +2393,7 @@ def unregister():
         del bpy.types.Object.replicator
     for c in reversed(classes):
         _safe_unregister_class(c)
+    _field_sig.clear(); _ref_sig.clear(); _curve_sig.clear()
 
 
 if __name__ == "__main__":
